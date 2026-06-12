@@ -1,0 +1,1567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CipherQ PQC Scanner — Quantum Threat Assessment</title>
+<style>
+  :root {
+    --bg:         #0a0d13;
+    --surface:    #111520;
+    --surface2:   #161c2d;
+    --border:     #1e2a40;
+    --accent:     #00b4d8;
+    --accent2:    #7b2fff;
+    --danger:     #ff3d6e;
+    --warn:       #ffaa00;
+    --ok:         #00e5a0;
+    --muted:      #4a5568;
+    --text:       #c8d6e8;
+    --text2:      #7a8fa8;
+    --font-mono:  'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+    --font-ui:    'Inter', 'Segoe UI', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: 14px;
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  /* ── Scanline overlay (aesthetic) ── */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,180,216,0.015) 2px,
+      rgba(0,180,216,0.015) 4px
+    );
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ── Layout ── */
+  .shell {
+    position: relative;
+    z-index: 1;
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+
+  /* ── Header ── */
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 20px 0 18px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+
+  .logo-mark {
+    width: 40px;
+    height: 40px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    font-weight: 900;
+    color: #fff;
+    flex-shrink: 0;
+  }
+
+  .logo-text {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .logo-text .brand {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    color: #fff;
+  }
+
+  .logo-text .subtitle {
+    font-size: 11px;
+    color: var(--text2);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .header-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 11px;
+    color: var(--text2);
+    font-family: var(--font-mono);
+  }
+
+  .status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--ok);
+    box-shadow: 0 0 8px var(--ok);
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  /* ── Scan Input Panel ── */
+  .scan-panel {
+    margin: 32px 0 28px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px 32px;
+  }
+
+  .scan-panel h2 {
+    font-size: 15px;
+    font-weight: 600;
+    color: #fff;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .scan-panel h2::before {
+    content: '';
+    display: block;
+    width: 3px;
+    height: 18px;
+    background: var(--accent);
+    border-radius: 2px;
+  }
+
+  .scan-form {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 12px;
+    align-items: end;
+  }
+
+  .field-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .field-group label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text2);
+    font-weight: 600;
+  }
+
+  input[type="text"], textarea {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.2s;
+    width: 100%;
+  }
+
+  input[type="text"]:focus, textarea:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(0,180,216,0.12);
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+
+  .btn-primary {
+    background: linear-gradient(135deg, var(--accent), #0077a8);
+    color: #fff;
+  }
+  .btn-primary:hover { filter: brightness(1.15); transform: translateY(-1px); }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--text2);
+    border: 1px solid var(--border);
+  }
+  .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+
+  .scan-options {
+    display: flex;
+    gap: 20px;
+    margin-top: 14px;
+  }
+
+  .check-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text2);
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .check-label input[type="checkbox"] {
+    accent-color: var(--accent);
+    width: 14px;
+    height: 14px;
+  }
+
+  /* ── Progress ── */
+  .progress-bar {
+    height: 3px;
+    background: var(--border);
+    border-radius: 2px;
+    margin-top: 16px;
+    overflow: hidden;
+    display: none;
+  }
+
+  .progress-bar.visible { display: block; }
+
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    transition: width 0.3s;
+    border-radius: 2px;
+  }
+
+  .progress-label {
+    font-size: 11px;
+    color: var(--text2);
+    font-family: var(--font-mono);
+    margin-top: 6px;
+    display: none;
+  }
+
+  .progress-label.visible { display: block; }
+
+  /* ── Results Grid ── */
+  #results { display: none; }
+  #results.visible { display: block; }
+
+  /* ── Summary Cards ── */
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .stat-card .stat-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text2);
+    font-weight: 600;
+  }
+
+  .stat-card .stat-value {
+    font-size: 28px;
+    font-weight: 800;
+    font-family: var(--font-mono);
+    line-height: 1.1;
+  }
+
+  .stat-card .stat-sub {
+    font-size: 11px;
+    color: var(--text2);
+  }
+
+  .stat-danger { color: var(--danger); }
+  .stat-warn   { color: var(--warn); }
+  .stat-ok     { color: var(--ok); }
+  .stat-accent { color: var(--accent); }
+  .stat-muted  { color: var(--muted); }
+
+  /* ── HNDL Risk Banner ── */
+  .risk-banner {
+    border-radius: 10px;
+    padding: 18px 22px;
+    margin-bottom: 24px;
+    border-left: 4px solid;
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+  }
+
+  .risk-banner.high    { background: rgba(255,61,110,0.07); border-color: var(--danger); }
+  .risk-banner.medium  { background: rgba(255,170,0,0.07);  border-color: var(--warn); }
+  .risk-banner.low     { background: rgba(0,229,160,0.07);  border-color: var(--ok); }
+  .risk-banner.unknown { background: rgba(74,85,104,0.12);  border-color: var(--muted); }
+
+  .risk-icon { font-size: 24px; flex-shrink: 0; margin-top: 2px; }
+  .risk-body { flex: 1; }
+  .risk-body strong { color: #fff; display: block; margin-bottom: 4px; }
+  .risk-body p { font-size: 13px; color: var(--text2); line-height: 1.5; }
+
+  /* ── Two-column layout for main content ── */
+  .results-layout {
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    gap: 20px;
+    align-items: start;
+  }
+
+  /* ── Findings table ── */
+  .findings-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .findings-section .section-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--surface2);
+  }
+
+  .section-header h3 {
+    font-size: 13px;
+    font-weight: 700;
+    color: #fff;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .section-header .count-badge {
+    background: var(--danger);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 20px;
+    font-family: var(--font-mono);
+  }
+
+  .filter-tabs {
+    display: flex;
+    padding: 12px 20px;
+    gap: 8px;
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+
+  .filter-tab {
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    color: var(--text2);
+    background: transparent;
+    transition: all 0.15s;
+  }
+
+  .filter-tab.active { color: #fff; border-color: var(--accent); background: rgba(0,180,216,0.12); }
+  .filter-tab[data-sev="critical"].active { border-color: var(--danger); background: rgba(255,61,110,0.12); color: var(--danger); }
+  .filter-tab[data-sev="high"].active { border-color: var(--warn); background: rgba(255,170,0,0.12); color: var(--warn); }
+  .filter-tab[data-sev="medium"].active { border-color: var(--accent); background: rgba(0,180,216,0.12); color: var(--accent); }
+
+  .finding-item {
+    border-bottom: 1px solid var(--border);
+    padding: 14px 20px;
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+
+  .finding-item:last-child { border-bottom: none; }
+  .finding-item:hover { background: var(--surface2); }
+
+  .finding-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-bottom: 4px;
+  }
+
+  .sev-badge {
+    font-size: 9px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 2px 7px;
+    border-radius: 4px;
+    flex-shrink: 0;
+    margin-top: 2px;
+    font-family: var(--font-mono);
+  }
+
+  .sev-critical { background: var(--danger);             color: #fff; }
+  .sev-high     { background: rgba(255,170,0,0.2);       color: var(--warn); border: 1px solid var(--warn); }
+  .sev-medium   { background: rgba(0,180,216,0.15);      color: var(--accent); border: 1px solid var(--accent); }
+  .sev-low      { background: rgba(74,85,104,0.3);       color: var(--text2); border: 1px solid var(--muted); }
+  .sev-info     { background: rgba(123,47,255,0.15);     color: #a78bfa; border: 1px solid rgba(123,47,255,0.4); }
+
+  .finding-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #fff;
+    line-height: 1.3;
+  }
+
+  .finding-host {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--accent);
+    margin-bottom: 5px;
+  }
+
+  .finding-detail {
+    font-size: 12px;
+    color: var(--text2);
+    line-height: 1.5;
+    display: none;
+    margin-top: 8px;
+  }
+
+  .finding-detail.expanded { display: block; }
+
+  .finding-rec {
+    margin-top: 8px;
+    padding: 8px 12px;
+    background: rgba(0,229,160,0.06);
+    border-left: 2px solid var(--ok);
+    border-radius: 0 4px 4px 0;
+    font-size: 12px;
+    color: var(--ok);
+  }
+
+  .finding-nist {
+    margin-top: 6px;
+    font-size: 10px;
+    color: var(--muted);
+    font-family: var(--font-mono);
+  }
+
+  /* ── Host table sidebar ── */
+  .sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .host-table-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .host-table-card .section-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface2);
+  }
+
+  .host-table-card table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+    font-family: var(--font-mono);
+  }
+
+  .host-table-card th {
+    padding: 8px 14px;
+    text-align: left;
+    color: var(--text2);
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface2);
+  }
+
+  .host-table-card td {
+    padding: 8px 14px;
+    border-bottom: 1px solid rgba(30,42,64,0.5);
+    color: var(--text);
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .host-table-card tr:last-child td { border-bottom: none; }
+  .host-table-card tr:hover td { background: var(--surface2); }
+
+  .pq-badge {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .pq-none    { background: rgba(255,61,110,0.2);  color: var(--danger); }
+  .pq-unknown { background: rgba(255,170,0,0.15);  color: var(--warn); }
+  .pq-partial { background: rgba(0,180,216,0.15);  color: var(--accent); }
+  .pq-ready   { background: rgba(0,229,160,0.15);  color: var(--ok); }
+  .pq-na      { background: rgba(74,85,104,0.2);   color: var(--muted); }
+
+  /* ── CA Distribution ── */
+  .ca-chart {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 14px 16px;
+  }
+
+  .ca-bar-row {
+    display: grid;
+    grid-template-columns: 120px 1fr 28px;
+    align-items: center;
+    gap: 10px;
+    font-size: 11px;
+  }
+
+  .ca-name { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .ca-bar-track {
+    height: 6px;
+    background: var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+
+  .ca-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    border-radius: 3px;
+    transition: width 0.5s;
+  }
+
+  .ca-count {
+    color: var(--text2);
+    font-family: var(--font-mono);
+    text-align: right;
+  }
+
+  /* ── DNS Surface panel ── */
+  .dns-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .dns-group {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .dns-group:last-child { border-bottom: none; }
+
+  .dns-group-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text2);
+    margin-bottom: 8px;
+    font-weight: 600;
+  }
+
+  .dns-hosts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .dns-chip {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    color: var(--text2);
+  }
+
+  .dns-chip.reachable  { border-color: rgba(0,229,160,0.3); color: var(--ok); }
+  .dns-chip.warning    { border-color: rgba(255,170,0,0.3);  color: var(--warn); }
+  .dns-chip.danger     { border-color: rgba(255,61,110,0.3); color: var(--danger); }
+
+  /* ── Roadmap ── */
+  .roadmap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    margin-top: 24px;
+  }
+
+  .roadmap h3 {
+    font-size: 13px;
+    font-weight: 700;
+    color: #fff;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 18px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .roadmap h3::before {
+    content: '';
+    display: block;
+    width: 3px;
+    height: 16px;
+    background: var(--accent2);
+    border-radius: 2px;
+  }
+
+  .roadmap-phases {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+
+  .phase-card {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+  }
+
+  .phase-card .phase-label {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text2);
+    margin-bottom: 4px;
+  }
+
+  .phase-card .phase-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 10px;
+  }
+
+  .phase-card ul {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .phase-card ul li {
+    font-size: 12px;
+    color: var(--text2);
+    padding-left: 16px;
+    position: relative;
+  }
+
+  .phase-card ul li::before {
+    content: '→';
+    position: absolute;
+    left: 0;
+    color: var(--accent);
+    font-size: 10px;
+  }
+
+  /* ── Empty / loading states ── */
+  .empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text2);
+  }
+
+  .empty-state .icon { font-size: 48px; margin-bottom: 16px; opacity: 0.4; }
+  .empty-state p { font-size: 13px; }
+
+  /* ── Scan log ── */
+  .scan-log {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text2);
+    max-height: 200px;
+    overflow-y: auto;
+    margin-top: 12px;
+    display: none;
+  }
+
+  .scan-log.visible { display: block; }
+  .scan-log .log-line { margin-bottom: 3px; }
+  .scan-log .log-ok { color: var(--ok); }
+  .scan-log .log-warn { color: var(--warn); }
+  .scan-log .log-err { color: var(--danger); }
+  .scan-log .log-info { color: var(--accent); }
+
+  /* ── Tabs for results sections ── */
+  .results-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0;
+  }
+
+  .results-tab {
+    padding: 8px 16px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    background: transparent;
+    color: var(--text2);
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    transition: all 0.15s;
+  }
+
+  .results-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .results-tab:hover:not(.active) { color: var(--text); }
+
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* ── Scrollbar ── */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  /* ── Responsive ── */
+  @media (max-width: 960px) {
+    .results-layout { grid-template-columns: 1fr; }
+    .roadmap-phases { grid-template-columns: 1fr; }
+    .scan-form { grid-template-columns: 1fr; }
+  }
+
+  .mono { font-family: var(--font-mono); }
+  .text-danger { color: var(--danger); }
+  .text-warn   { color: var(--warn); }
+  .text-ok     { color: var(--ok); }
+  .text-accent { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <!-- Header -->
+  <header>
+    <div class="logo-mark">CQ</div>
+    <div class="logo-text">
+      <span class="brand">CipherQ PQC Scanner</span>
+      <span class="subtitle">Post-Quantum Cryptographic Threat Assessment</span>
+    </div>
+    <div class="header-right">
+      <div class="status-dot"></div>
+      <span>ENGINE ONLINE · NIST FIPS 203/204 · IETF draft-ietf-tls-ecdhe-mlkem-05</span>
+    </div>
+  </header>
+
+  <!-- Scan Panel -->
+  <div class="scan-panel">
+    <h2>Domain Quantum Threat Assessment</h2>
+    <div class="scan-form">
+      <div class="field-group">
+        <label>Target Domain</label>
+        <input type="text" id="domain-input" placeholder="e.g. example.com" autocomplete="off" autocapitalize="off">
+      </div>
+      <div class="field-group">
+        <label>Custom Hosts (optional)</label>
+        <input type="text" id="custom-hosts" placeholder="host1.example.com, host2.example.com">
+      </div>
+      <div class="field-group" style="justify-content: flex-end;">
+        <label>&nbsp;</label>
+        <button class="btn btn-primary" id="scan-btn" onclick="startScan()">
+          <span>▶</span> Run Scan
+        </button>
+      </div>
+    </div>
+    <div class="scan-options">
+      <label class="check-label">
+        <input type="checkbox" id="opt-legacy" checked> Legacy TLS version probes (TLS 1.0/1.1)
+      </label>
+      <label class="check-label">
+        <input type="checkbox" id="opt-weak" checked> Weak cipher suite probes
+      </label>
+      <label class="check-label">
+        <input type="checkbox" id="opt-log"> Show scan log
+      </label>
+    </div>
+    <div class="progress-bar" id="progress-bar">
+      <div class="progress-fill" id="progress-fill" style="width:0%"></div>
+    </div>
+    <div class="progress-label" id="progress-label">Initialising...</div>
+    <div class="scan-log" id="scan-log"></div>
+  </div>
+
+  <!-- Results -->
+  <div id="results">
+
+    <!-- Summary Stats -->
+    <div class="summary-grid" id="summary-grid"></div>
+
+    <!-- HNDL Risk Banner -->
+    <div class="risk-banner" id="risk-banner"></div>
+
+    <!-- Report button bar -->
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:20px;">
+      <button class="btn btn-primary" id="report-btn" onclick="downloadReport()" style="background:linear-gradient(135deg,#7b2fff,#4a0fb5);">
+        <span>⬇</span> Download Report (.docx)
+      </button>
+      <span id="report-status" style="font-size:12px; color:var(--text2);"></span>
+    </div>
+
+    <!-- Tabs -->
+    <div class="results-tabs">
+      <button class="results-tab active" onclick="showTab('tab-findings', this)">Findings</button>
+      <button class="results-tab" onclick="showTab('tab-hosts', this)">Host Detail</button>
+      <button class="results-tab" onclick="showTab('tab-dns', this)">DNS Surface</button>
+      <button class="results-tab" onclick="showTab('tab-roadmap', this)">Roadmap</button>
+    </div>
+
+    <!-- Findings Tab -->
+    <div class="tab-panel active" id="tab-findings">
+      <div class="results-layout">
+        <div class="findings-section" id="findings-section">
+          <div class="section-header">
+            <h3>Security Findings</h3>
+            <span class="count-badge" id="findings-count">0</span>
+          </div>
+          <div class="filter-tabs" id="filter-tabs"></div>
+          <div id="findings-list"></div>
+        </div>
+
+        <div class="sidebar">
+          <!-- CA Distribution -->
+          <div class="host-table-card" id="ca-section">
+            <div class="section-header">
+              <h3>Certificate Authorities</h3>
+            </div>
+            <div class="ca-chart" id="ca-chart"></div>
+          </div>
+
+          <!-- Protocol Distribution -->
+          <div class="host-table-card" id="proto-section">
+            <div class="section-header">
+              <h3>Protocols Observed</h3>
+            </div>
+            <div class="ca-chart" id="proto-chart"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Host Detail Tab -->
+    <div class="tab-panel" id="tab-hosts">
+      <div class="host-table-card">
+        <div class="section-header">
+          <h3>Reachable Hosts</h3>
+        </div>
+        <table id="host-table">
+          <thead>
+            <tr>
+              <th>Hostname</th>
+              <th>Protocol</th>
+              <th>Cipher</th>
+              <th>CA</th>
+              <th>Cert Expiry</th>
+              <th>SNI</th>
+              <th>PQ Ready</th>
+              <th>HNDL Risk</th>
+            </tr>
+          </thead>
+          <tbody id="host-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- DNS Surface Tab -->
+    <div class="tab-panel" id="tab-dns">
+      <div class="dns-panel" id="dns-panel">
+        <div class="section-header" style="padding:14px 16px; border-bottom:1px solid var(--border); background:var(--surface2);">
+          <h3>DNS Surface Enumeration</h3>
+        </div>
+        <div id="dns-content"></div>
+      </div>
+    </div>
+
+    <!-- Roadmap Tab -->
+    <div class="tab-panel" id="tab-roadmap">
+      <div class="roadmap" id="roadmap-section"></div>
+    </div>
+
+  </div><!-- /#results -->
+
+</div><!-- /.shell -->
+
+<script>
+let currentJobId = null;
+let pollTimer = null;
+let scanData = null;
+let currentFilter = 'all';
+let logLines = 0;
+
+// ─── Demo / API bridge ───────────────────────────────────────────────────────
+// When running standalone (no server), we simulate via the Anthropic API
+// When server is running, we call /api/scan
+const USE_API_SIMULATION = false; // routes through /api/ai-scan proxy on the server
+
+async function startScan() {
+  const domain = document.getElementById('domain-input').value.trim();
+  if (!domain) { alert('Please enter a domain to scan.'); return; }
+
+  // Validate
+  const domainRe = /^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/;
+  if (!domainRe.test(domain)) { alert('Please enter a valid domain (e.g. example.com)'); return; }
+
+  const customRaw = document.getElementById('custom-hosts').value.trim();
+  const customHosts = customRaw ? customRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+  document.getElementById('results').classList.remove('visible');
+  document.getElementById('scan-btn').disabled = true;
+  document.getElementById('scan-btn').textContent = '⏳ Scanning...';
+
+  const bar = document.getElementById('progress-bar');
+  const fill = document.getElementById('progress-fill');
+  const label = document.getElementById('progress-label');
+  const log = document.getElementById('scan-log');
+  const showLog = document.getElementById('opt-log').checked;
+
+  bar.classList.add('visible');
+  label.classList.add('visible');
+  if (showLog) log.classList.add('visible');
+  log.innerHTML = '';
+  logLines = 0;
+  fill.style.width = '5%';
+  label.textContent = `Scanning ${domain}…`;
+
+  addLog('info', `Starting PQC scan of ${domain}`);
+  addLog('info', `Probe options: legacy=${document.getElementById('opt-legacy').checked}, weakCipher=${document.getElementById('opt-weak').checked}`);
+
+  try {
+    if (USE_API_SIMULATION) {
+      await runSimulatedScan(domain, customHosts, fill, label);
+    } else {
+      await runServerScan(domain, customHosts, fill, label);
+    }
+  } catch(e) {
+    addLog('err', `Scan error: ${e.message}`);
+    label.textContent = `Error: ${e.message}`;
+  }
+
+  document.getElementById('scan-btn').disabled = false;
+  document.getElementById('scan-btn').textContent = '▶ Run Scan';
+}
+
+function addLog(type, msg) {
+  const log = document.getElementById('scan-log');
+  if (!document.getElementById('opt-log').checked) return;
+  logLines++;
+  const ts = new Date().toTimeString().slice(0,8);
+  const div = document.createElement('div');
+  div.className = `log-line log-${type}`;
+  div.textContent = `[${ts}] ${msg}`;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+}
+
+// ─── Simulated scan via Claude API ──────────────────────────────────────────
+async function runSimulatedScan(domain, customHosts, fill, label) {
+  label.textContent = 'Calling Claude AI scanner engine…';
+  fill.style.width = '15%';
+
+  const systemPrompt = `You are a senior post-quantum cryptography security engineer. You simulate realistic TLS and DNS scanning results for a domain. You MUST return ONLY valid JSON — no prose, no markdown fences, no explanation.
+
+The JSON structure must be exactly:
+{
+  "summary": {
+    "domain": string,
+    "scanTime": ISO8601,
+    "hostsProbed": number,
+    "hostsReachable": number,
+    "hostsUnreachable": number,
+    "hostsNxdomain": number,
+    "findingsTotal": number,
+    "findingsBySeverity": { "critical": n, "high": n, "medium": n, "low": n, "info": n },
+    "pqReadinessBreakdown": { "none": n, "unknown": n, "partial": n, "ready": n },
+    "protocolsObserved": [string],
+    "ciphersObserved": [string],
+    "casObserved": [string],
+    "sniMismatches": [string],
+    "devHostsExposed": [string],
+    "overallHndlRisk": "high" | "high-likely" | "partial" | "unknown"
+  },
+  "hosts": [
+    {
+      "hostname": string,
+      "dns": { "resolves": bool, "aRecords": [string] },
+      "tls": {
+        "protocol": string or null,
+        "cipher": string or null,
+        "certDaysToExpiry": number or null,
+        "caName": string or null,
+        "caClassical": bool,
+        "sniMatch": { "match": bool, "detail": string },
+        "kex": { "pqStatus": "classical"|"classical-likely"|"pq-hybrid"|"unknown", "label": string },
+        "certSig": { "algorithm": string, "pqStatus": "quantum-vulnerable"|"quantum-safe"|"unknown", "label": string }
+      } or null,
+      "findings": [
+        {
+          "id": string,
+          "severity": "critical"|"high"|"medium"|"low"|"info",
+          "area": string,
+          "title": string,
+          "detail": string,
+          "recommendation": string or null,
+          "priority": "P1"|"P2" or null,
+          "nistRef": string or null
+        }
+      ],
+      "pqReadiness": "none"|"unknown"|"partial"|"ready"|"not-applicable",
+      "hndlRisk": "high"|"high-likely"|"mitigated"|"not-applicable"|"unknown",
+      "tnflRisk": "high"|"mitigated"|"not-applicable"|"unknown",
+      "riskScore": number
+    }
+  ],
+  "findings": [
+    {
+      "id": string,
+      "hostname": string,
+      "severity": "critical"|"high"|"medium"|"low"|"info",
+      "area": string,
+      "title": string,
+      "detail": string,
+      "recommendation": string or null,
+      "priority": "P1"|"P2" or null,
+      "nistRef": string or null
+    }
+  ]
+}
+
+Generate realistic, accurate results for the domain. Include:
+- 6-12 probed hostnames (www, mail, api, dev, portal, etc as appropriate)
+- 4-8 reachable hosts, all showing TLS 1.3 with TLS_AES_256_GCM_SHA384
+- 0 hosts with post-quantum KEX (this is the 2026 industry norm)
+- Realistic CAs: Let's Encrypt, Google Trust Services, DigiCert
+- All certs with RSA-2048 or ECDSA-256 signatures (not PQ)
+- Certificate expiry 30-90 days out
+- At least one SNI mismatch if the domain has a CDN
+- Any dev.* or staging.* subdomain should generate a P1 finding
+- Realistic HNDL risk: "high-likely" for all reachable hosts
+- Findings should include KEX-PQ-STATUS-UNKNOWN for all TLS 1.3 hosts, CERT-CLASSICAL-SIG for all
+- Include DNS-HOSTING-DEFAULT and DNS-INTERNAL-PLATFORM findings for common subdomains
+- Make findings technically precise and consistent with NIST FIPS 203/204, NIST IR 8547, draft-ietf-tls-ecdhe-mlkem-05
+- Risk scores: 35-65 for reachable hosts given no PQ KEX and classical certs
+
+Be realistic and accurate. Return ONLY the JSON object.`;
+
+  const userPrompt = `Perform a quantum threat assessment scan of the domain: ${domain}
+${customHosts.length > 0 ? `Custom hosts to include: ${customHosts.join(', ')}` : 'Use realistic common subdomains for this domain.'}
+Legacy TLS probe: ${document.getElementById('opt-legacy').checked}
+Weak cipher probe: ${document.getElementById('opt-weak').checked}`;
+
+  fill.style.width = '30%';
+  label.textContent = 'Running cryptographic analysis…';
+
+  const response = await fetch('/api/ai-scan', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 4000,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }]
+    })
+  });
+
+  fill.style.width = '70%';
+  label.textContent = 'Processing results…';
+
+  const data = await response.json();
+  const raw = data.content.map(b => b.text || '').join('');
+
+  let result;
+  try {
+    const clean = raw.replace(/^```json\s*/,'').replace(/```\s*$/,'').trim();
+    result = JSON.parse(clean);
+  } catch(e) {
+    throw new Error('Failed to parse scan results: ' + e.message);
+  }
+
+  fill.style.width = '90%';
+  addLog('ok', `Scan complete: ${result.summary.hostsReachable} reachable, ${result.findings.length} findings`);
+  fill.style.width = '100%';
+  label.textContent = `Scan complete — ${result.findings.length} findings on ${result.summary.hostsReachable} hosts`;
+
+  renderResults(result);
+}
+
+// ─── Server-based scan ───────────────────────────────────────────────────────
+async function runServerScan(domain, customHosts, fill, label) {
+  const resp = await fetch('/api/scan', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      domain, customHosts,
+      deepLegacy: document.getElementById('opt-legacy').checked,
+      weakCipher: document.getElementById('opt-weak').checked,
+    })
+  });
+  const { jobId } = await resp.json();
+
+  // Poll
+  while (true) {
+    await new Promise(r => setTimeout(r, 1500));
+    const poll = await fetch(`/api/scan/${jobId}`).then(r => r.json());
+    if (poll.progress) {
+      const pct = Math.round((poll.progress.completed / (poll.progress.total || 1)) * 100);
+      fill.style.width = `${pct}%`;
+      label.textContent = `Probing ${poll.progress.completed} / ${poll.progress.total} hosts…`;
+      addLog('info', `Progress: ${poll.progress.completed}/${poll.progress.total}`);
+    }
+    if (poll.status === 'complete') {
+      renderResults(poll.result);
+      break;
+    }
+    if (poll.status === 'error') throw new Error(poll.error);
+  }
+}
+
+// ─── Render Results ──────────────────────────────────────────────────────────
+function renderResults(data) {
+  scanData = data;
+  const { summary, hosts, findings } = data;
+
+  // Summary cards
+  const sev = summary.findingsBySeverity;
+  const grid = document.getElementById('summary-grid');
+  grid.innerHTML = `
+    <div class="stat-card">
+      <div class="stat-label">Hosts Probed</div>
+      <div class="stat-value stat-accent">${summary.hostsProbed}</div>
+      <div class="stat-sub">${summary.hostsReachable} reachable</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Critical Findings</div>
+      <div class="stat-value stat-danger">${sev.critical}</div>
+      <div class="stat-sub">${sev.high} high, ${sev.medium} medium</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">PQ-Ready Hosts</div>
+      <div class="stat-value ${summary.pqReadinessBreakdown.ready > 0 ? 'stat-ok' : 'stat-danger'}">${summary.pqReadinessBreakdown.ready}</div>
+      <div class="stat-sub">of ${summary.hostsReachable} reachable</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">SNI Mismatches</div>
+      <div class="stat-value ${summary.sniMismatches.length > 0 ? 'stat-warn' : 'stat-ok'}">${summary.sniMismatches.length}</div>
+      <div class="stat-sub">certificate binding errors</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Dev Hosts Exposed</div>
+      <div class="stat-value ${summary.devHostsExposed.length > 0 ? 'stat-danger' : 'stat-ok'}">${summary.devHostsExposed.length}</div>
+      <div class="stat-sub">publicly reachable</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">HNDL Risk</div>
+      <div class="stat-value ${summary.overallHndlRisk.startsWith('high') ? 'stat-danger' : 'stat-warn'}">${summary.overallHndlRisk.toUpperCase().replace('-',' ')}</div>
+      <div class="stat-sub">harvest-now-decrypt-later</div>
+    </div>
+  `;
+
+  // HNDL Banner
+  const banner = document.getElementById('risk-banner');
+  const hndl = summary.overallHndlRisk;
+  const bannerClass = hndl.startsWith('high') ? 'high' : hndl === 'partial' ? 'medium' : 'low';
+  const bannerIcon = hndl.startsWith('high') ? '⚠️' : hndl === 'partial' ? '⚡' : '✅';
+  banner.className = `risk-banner ${bannerClass}`;
+  banner.innerHTML = `
+    <div class="risk-icon">${bannerIcon}</div>
+    <div class="risk-body">
+      <strong>Harvest-Now-Decrypt-Later (HNDL) Risk: ${hndl.toUpperCase().replace('-',' ')}</strong>
+      <p>${hndl.startsWith('high')
+        ? `No reachable host on <strong>${summary.domain}</strong> shows evidence of hybrid post-quantum key exchange. An adversary recording TLS traffic today can decrypt it once a Cryptanalytically-Relevant Quantum Computer (CRQC) exists. For any organisation holding long-lived sensitive data, this is a P1 concern. Recommended action: enable X25519MLKEM768 hybrid KEX (OpenSSL 3.5+, Go 1.24+) within 90 days.`
+        : hndl === 'partial'
+        ? `Some hosts have partial post-quantum protection. Complete hybrid KEX deployment across all endpoints.`
+        : `HNDL risk appears mitigated on scanned hosts. Maintain hybrid KEX and continue quarterly review.`
+      }</p>
+    </div>
+  `;
+
+  // Findings
+  renderFindings(findings);
+
+  // Host table
+  renderHostTable(hosts);
+
+  // DNS surface
+  renderDNSSurface(hosts);
+
+  // CA chart
+  renderCAChart(summary.casObserved, hosts);
+
+  // Protocol chart
+  renderProtoChart(summary.protocolsObserved, hosts);
+
+  // Roadmap
+  renderRoadmap(summary);
+
+  document.getElementById('results').classList.add('visible');
+  document.getElementById('results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function renderFindings(findings) {
+  const list = document.getElementById('findings-list');
+  const countBadge = document.getElementById('findings-count');
+  const filterTabs = document.getElementById('filter-tabs');
+
+  countBadge.textContent = findings.length;
+
+  const severities = ['all', 'critical', 'high', 'medium', 'low', 'info'];
+  const counts = { all: findings.length };
+  for (const sev of ['critical','high','medium','low','info']) {
+    counts[sev] = findings.filter(f => f.severity === sev).length;
+  }
+
+  filterTabs.innerHTML = severities
+    .filter(s => counts[s] > 0)
+    .map(s => `<button class="filter-tab ${s === 'all' ? 'active' : ''}" data-sev="${s}" onclick="filterFindings('${s}', this)">${s.charAt(0).toUpperCase()+s.slice(1)} (${counts[s]})</button>`)
+    .join('');
+
+  renderFindingsList(findings, 'all');
+}
+
+function renderFindingsList(findings, filter) {
+  currentFilter = filter;
+  const list = document.getElementById('findings-list');
+  const filtered = filter === 'all' ? findings : findings.filter(f => f.severity === filter);
+
+  if (filtered.length === 0) {
+    list.innerHTML = '<div class="empty-state"><div class="icon">✓</div><p>No findings in this category.</p></div>';
+    return;
+  }
+
+  const order = ['critical','high','medium','low','info'];
+  const sorted = [...filtered].sort((a,b) => order.indexOf(a.severity) - order.indexOf(b.severity));
+
+  list.innerHTML = sorted.map((f, i) => `
+    <div class="finding-item" onclick="toggleFinding(${i})">
+      <div class="finding-host">${f.hostname || ''}</div>
+      <div class="finding-header">
+        <span class="sev-badge sev-${f.severity}">${f.severity}</span>
+        <span class="finding-title">${f.title}</span>
+      </div>
+      <div class="finding-detail" id="fd-${i}">
+        <p>${f.detail}</p>
+        ${f.recommendation ? `<div class="finding-rec">→ ${f.recommendation}</div>` : ''}
+        ${f.nistRef ? `<div class="finding-nist">NIST: ${f.nistRef}</div>` : ''}
+        ${f.priority ? `<div class="finding-nist">Priority: ${f.priority}</div>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+function filterFindings(sev, btn) {
+  document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  renderFindingsList(scanData.findings, sev);
+}
+
+function toggleFinding(i) {
+  const el = document.getElementById(`fd-${i}`);
+  el.classList.toggle('expanded');
+}
+
+function renderHostTable(hosts) {
+  const tbody = document.getElementById('host-tbody');
+  const reachable = hosts.filter(h => h.tls?.cipher);
+
+  tbody.innerHTML = reachable.map(h => {
+    const sni = h.tls?.sniMatch;
+    const days = h.tls?.certDaysToExpiry;
+    const expiryClass = days !== null && days !== undefined
+      ? (days < 14 ? 'text-danger' : days < 30 ? 'text-warn' : 'text-ok')
+      : '';
+
+    return `
+      <tr>
+        <td class="mono" title="${h.hostname}">${h.hostname}</td>
+        <td class="mono">${h.tls?.protocol || '—'}</td>
+        <td class="mono" style="max-width:140px;font-size:10px;">${(h.tls?.cipher || '—').replace('TLS_','')}</td>
+        <td>${h.tls?.caName || '—'}</td>
+        <td class="${expiryClass} mono">${days !== null && days !== undefined ? `${days}d` : '—'}</td>
+        <td>${sni ? (sni.match ? '<span class="text-ok">✓</span>' : '<span class="text-danger">✗ MISMATCH</span>') : '—'}</td>
+        <td><span class="pq-badge pq-${h.pqReadiness}">${h.pqReadiness}</span></td>
+        <td><span class="${h.hndlRisk === 'mitigated' ? 'text-ok' : h.hndlRisk === 'not-applicable' ? '' : 'text-danger'}">${h.hndlRisk}</span></td>
+      </tr>
+    `;
+  }).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--text2);padding:20px">No reachable hosts found</td></tr>';
+}
+
+function renderDNSSurface(hosts) {
+  const content = document.getElementById('dns-content');
+
+  const reachable = hosts.filter(h => h.tls?.cipher);
+  const dnsOnly = hosts.filter(h => h.dns?.resolves && !h.tls?.cipher);
+  const nxdomain = hosts.filter(h => !h.dns?.resolves);
+  const devHosts = hosts.filter(h => h.findings.some(f => f.id === 'DNS-DEV-EXPOSED'));
+  const sniMismatches = reachable.filter(h => h.tls?.sniMatch && !h.tls.sniMatch.match);
+
+  content.innerHTML = `
+    <div class="dns-group">
+      <div class="dns-group-label">Reachable (TLS handshake completed) — ${reachable.length}</div>
+      <div class="dns-hosts">${reachable.map(h =>
+        `<span class="dns-chip reachable" title="${h.tls?.protocol}">${h.hostname}</span>`
+      ).join('') || '<span style="color:var(--muted);font-size:11px">None</span>'}</div>
+    </div>
+    <div class="dns-group">
+      <div class="dns-group-label">DNS resolves but TLS unreachable — ${dnsOnly.length}</div>
+      <div class="dns-hosts">${dnsOnly.map(h =>
+        `<span class="dns-chip warning">${h.hostname}</span>`
+      ).join('') || '<span style="color:var(--muted);font-size:11px">None</span>'}</div>
+    </div>
+    ${devHosts.length > 0 ? `
+    <div class="dns-group">
+      <div class="dns-group-label" style="color:var(--danger)">⚠ Development infrastructure exposed — ${devHosts.length}</div>
+      <div class="dns-hosts">${devHosts.map(h =>
+        `<span class="dns-chip danger">${h.hostname}</span>`
+      ).join('')}</div>
+    </div>` : ''}
+    ${sniMismatches.length > 0 ? `
+    <div class="dns-group">
+      <div class="dns-group-label" style="color:var(--warn)">⚠ SNI / Certificate mismatches — ${sniMismatches.length}</div>
+      <div class="dns-hosts">${sniMismatches.map(h =>
+        `<span class="dns-chip danger" title="${h.tls?.sniMatch?.detail}">${h.hostname}</span>`
+      ).join('')}</div>
+    </div>` : ''}
+    <div class="dns-group">
+      <div class="dns-group-label">NXDOMAIN / No resolution — ${nxdomain.length}</div>
+      <div class="dns-hosts">${nxdomain.map(h =>
+        `<span class="dns-chip">${h.hostname}</span>`
+      ).join('') || '<span style="color:var(--muted);font-size:11px">None</span>'}</div>
+    </div>
+  `;
+}
+
+function renderCAChart(cas, hosts) {
+  const chart = document.getElementById('ca-chart');
+  const reachable = hosts.filter(h => h.tls?.caName);
+  const counts = {};
+  for (const h of reachable) {
+    const ca = h.tls.caName || 'Unknown';
+    counts[ca] = (counts[ca] || 0) + 1;
+  }
+  const sorted = Object.entries(counts).sort((a,b) => b[1]-a[1]);
+  const max = Math.max(...Object.values(counts), 1);
+
+  chart.innerHTML = sorted.map(([name, count]) => `
+    <div class="ca-bar-row">
+      <div class="ca-name" title="${name}">${name}</div>
+      <div class="ca-bar-track">
+        <div class="ca-bar-fill" style="width:${(count/max)*100}%"></div>
+      </div>
+      <div class="ca-count">${count}</div>
+    </div>
+  `).join('') || '<div style="padding:12px;color:var(--text2);font-size:12px">No data</div>';
+}
+
+function renderProtoChart(protocols, hosts) {
+  const chart = document.getElementById('proto-chart');
+  const reachable = hosts.filter(h => h.tls?.protocol);
+  const counts = {};
+  for (const h of reachable) {
+    const p = h.tls.protocol || 'Unknown';
+    counts[p] = (counts[p] || 0) + 1;
+  }
+  const sorted = Object.entries(counts).sort((a,b) => b[1]-a[1]);
+  const max = Math.max(...Object.values(counts), 1);
+
+  chart.innerHTML = sorted.map(([proto, count]) => `
+    <div class="ca-bar-row">
+      <div class="ca-name">${proto}</div>
+      <div class="ca-bar-track">
+        <div class="ca-bar-fill" style="width:${(count/max)*100}%;background:${proto === 'TLSv1.3' ? 'var(--ok)' : proto === 'TLSv1.2' ? 'var(--warn)' : 'var(--danger)'}"></div>
+      </div>
+      <div class="ca-count">${count}</div>
+    </div>
+  `).join('') || '<div style="padding:12px;color:var(--text2);font-size:12px">No data</div>';
+}
+
+function renderRoadmap(summary) {
+  const sev = summary.findingsBySeverity;
+  const section = document.getElementById('roadmap-section');
+
+  section.innerHTML = `
+    <h3>Recommended Remediation Roadmap</h3>
+    <div class="roadmap-phases">
+      <div class="phase-card" style="border-color: rgba(255,170,0,0.3)">
+        <div class="phase-label">Phase 1 · 0–6 months</div>
+        <div class="phase-title" style="color:var(--warn)">Inventory &amp; Configure</div>
+        <ul>
+          <li>Appoint named owner for public cryptographic posture</li>
+          <li>Run deep TLS enumeration (testssl.sh --groups) on all reachable hosts to confirm KEX groups</li>
+          <li>Build Cryptographic Bill of Materials (CBOM)</li>
+          <li>Resolve SNI mismatches ${summary.sniMismatches.length > 0 ? `(${summary.sniMismatches.join(', ')})` : ''}</li>
+          <li>Restrict or retire exposed dev infrastructure ${summary.devHostsExposed.length > 0 ? `(${summary.devHostsExposed.join(', ')})` : ''}</li>
+          <li>Enable Certificate Transparency monitoring on all domains</li>
+          <li>Engage CDN / hosting providers on hybrid PQ TLS roadmap</li>
+        </ul>
+      </div>
+      <div class="phase-card" style="border-color: rgba(0,180,216,0.3)">
+        <div class="phase-label">Phase 2 · 6–18 months</div>
+        <div class="phase-title" style="color:var(--accent)">Enable &amp; Retire</div>
+        <ul>
+          <li>Enable hybrid post-quantum KEX (X25519MLKEM768) on all TLS termination points</li>
+          <li>Update OpenSSL → 3.5+, Go runtimes → 1.24+ on origin servers</li>
+          <li>Prune dormant DNS subdomain entries</li>
+          <li>Migrate dev/staging environments to authenticated or private posture</li>
+          <li>Publish public-facing quantum-readiness statement</li>
+          <li>Validate middlebox compatibility (large ClientHello)</li>
+          <li>Update outside-counsel due-diligence questionnaire</li>
+        </ul>
+      </div>
+      <div class="phase-card" style="border-color: rgba(0,229,160,0.3)">
+        <div class="phase-label">Phase 3 · 18+ months</div>
+        <div class="phase-title" style="color:var(--ok)">Adopt &amp; Harden</div>
+        <ul>
+          <li>Adopt ML-DSA (FIPS 204) leaf certificates as CAs offer them (expected 2027+)</li>
+          <li>Re-issue all leaf certificates under PQ or hybrid signatures</li>
+          <li>Review long-term archived sensitive communications; re-encrypt where practical</li>
+          <li>Extend CBOM to cover internal infrastructure, endpoints, SaaS dependencies</li>
+          <li>Quarterly re-baseline; annual Management Board update</li>
+        </ul>
+      </div>
+    </div>
+
+    <div style="margin-top:20px; padding:16px; background:var(--surface2); border-radius:8px; border:1px solid var(--border);">
+      <div style="font-size:12px; color:var(--text2); line-height:1.7">
+        <strong style="color:#fff; display:block; margin-bottom:8px">Regulatory Timeline</strong>
+        <span class="text-warn">Jan 2027</span> — CNSA 2.0 acquisition mandate (US NSS) &nbsp;|&nbsp;
+        <span class="text-warn">2028</span> — UK NCSC: planning complete &nbsp;|&nbsp;
+        <span class="text-danger">2030</span> — NIST IR 8547: RSA-2048 &amp; ECC P-256 deprecated &nbsp;|&nbsp;
+        <span class="text-danger">2031</span> — UK NCSC: critical systems migrated &nbsp;|&nbsp;
+        <span class="text-danger">2035</span> — Full disallowance / migration horizon
+      </div>
+    </div>
+
+    <div style="margin-top:12px; padding:14px 18px; background:rgba(255,61,110,0.06); border-radius:8px; border-left:3px solid var(--danger);">
+      <p style="font-size:12px; color:var(--text2);">
+        <strong style="color:#fff">The asymmetry:</strong> A migration started in 2025–2026 completes before the CRQC threat window opens. 
+        A migration started in 2029 may not. The cost of starting twelve months late is not twelve months of delay — 
+        it is the loss of the safety margin.
+      </p>
+    </div>
+  `;
+}
+
+function showTab(tabId, btn) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.results-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById(tabId).classList.add('active');
+  btn.classList.add('active');
+}
+
+// Allow Enter key
+document.getElementById('domain-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') startScan();
+});
+
+// ─── Report Download ──────────────────────────────────────────────────────────
+async function downloadReport() {
+  if (!scanData) return;
+
+  const btn = document.getElementById('report-btn');
+  const status = document.getElementById('report-status');
+
+  btn.disabled = true;
+  btn.textContent = '⏳ Generating report…';
+  status.textContent = 'Building professional DOCX — this takes a few seconds…';
+
+  try {
+    const response = await fetch('/api/report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(scanData),
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ error: 'Unknown error' }));
+      throw new Error(err.error || `HTTP ${response.status}`);
+    }
+
+    // Get filename from Content-Disposition header
+    const disposition = response.headers.get('Content-Disposition') || '';
+    const match = disposition.match(/filename="([^"]+)"/);
+    const filename = match ? match[1] : `CipherQ_QTA_${scanData.summary.domain}.docx`;
+
+    // Trigger download
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    status.textContent = `✓ Downloaded: ${filename}`;
+    status.style.color = 'var(--ok)';
+  } catch (e) {
+    status.textContent = `Error: ${e.message}`;
+    status.style.color = 'var(--danger)';
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<span>⬇</span> Download Report (.docx)';
+  }
+}
+</script>
+</body>
+</html>
