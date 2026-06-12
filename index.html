@@ -944,7 +944,7 @@ let logLines = 0;
 // ─── Demo / API bridge ───────────────────────────────────────────────────────
 // When running standalone (no server), we simulate via the Anthropic API
 // When server is running, we call /api/scan
-const USE_API_SIMULATION = true; // set false when server is running
+const USE_API_SIMULATION = false; // routes through /api/ai-scan proxy on the server
 
 async function startScan() {
   const domain = document.getElementById('domain-input').value.trim();
@@ -1103,7 +1103,7 @@ Weak cipher probe: ${document.getElementById('opt-weak').checked}`;
   fill.style.width = '30%';
   label.textContent = 'Running cryptographic analysis…';
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
+  const response = await fetch('/api/ai-scan', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
