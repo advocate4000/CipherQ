@@ -174,10 +174,40 @@ app.post('/api/dns-scan', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+// ─── POST /api/http-scan — HTTP security headers, CORS, cookies, methods ──────
+app.post('/api/http-scan', async (req, res) => {
+  const { domain, hosts = [] } = req.body;
+  if (!domain) return res.status(400).json({ error: 'domain is required' });
+  try {
+    const { scanHTTPSecurity } = require('./http-security');
+    const result = await scanHTTPSecurity(domain, hosts);
+    res.json(result);
+  } catch (e) {
+    console.error('HTTP scan error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── POST /api/network-scan — Port scan, SSH, SMTP, IPv6 ─────────────────────
+app.post('/api/network-scan', async (req, res) => {
+  const { domain, hosts = [] } = req.body;
+  if (!domain) return res.status(400).json({ error: 'domain is required' });
+  try {
+    const { scanNetworkSecurity } = require('./network-security');
+    const result = await scanNetworkSecurity(domain, hosts);
+    res.json(result);
+  } catch (e) {
+    console.error('Network scan error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── POST /api/report — Generate DOCX report ──────────────────────────────────
 app.post('/api/report', async (req, res) => {
-  // Accept either {scanResult, dnsData} envelope or bare scanResult (legacy)
-  const scan    = req.body.scanResult || req.body;
-  const dnsData = req.body.dnsData    || null;
+  const scan        = req.body.scanResult  || req.body;
+  const dnsData     = req.body.dnsData     || null;
+  const httpData    = req.body.httpData    || null;
+  const networkData = req.body.networkData || null;
 
   if (!scan || !scan.summary) {
     return res.status(400).json({ error: 'Valid scan result required in request body.' });
@@ -185,7 +215,7 @@ app.post('/api/report', async (req, res) => {
 
   try {
     const { generateReport } = require('./report');
-    const buffer = await generateReport(scan, dnsData);
+    const buffer = await generateReport(scan, dnsData, httpData, networkData);
     const domain = scan.summary.domain.replace(/[^a-zA-Z0-9.-]/g, '_');
     const date = new Date().toISOString().slice(0, 10);
     const filename = `CipherQ_QTA_${domain}_${date}.docx`;

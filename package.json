@@ -1,7 +1,7 @@
 {
   "name": "cipherq-pqc-scanner",
-  "version": "1.2.0",
-  "description": "Post-Quantum Cryptographic domain scanner with DNS security and DOCX report generation",
+  "version": "2.0.0",
+  "description": "Full-spectrum penetration testing and PQC domain scanner",
   "main": "scanner.js",
   "scripts": { "start": "node server.js" },
   "dependencies": {

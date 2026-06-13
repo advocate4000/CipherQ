@@ -866,6 +866,8 @@
       <button class="results-tab" onclick="showTab('tab-dns', this)">DNS Surface</button>
       <button class="results-tab" onclick="showTab('tab-roadmap', this)">Roadmap</button>
       <button class="results-tab" onclick="showTab('tab-dns-security', this); loadDNSSecurity()">DNS Security</button>
+      <button class="results-tab" onclick="showTab('tab-http-security', this); loadHTTPSecurity()">HTTP Security</button>
+      <button class="results-tab" onclick="showTab('tab-network-security', this); loadNetworkSecurity()">Network & Ports</button>
     </div>
 
     <!-- Findings Tab -->
@@ -949,6 +951,26 @@
       </div>
     </div>
 
+    <!-- HTTP Security Tab -->
+    <div class="tab-panel" id="tab-http-security">
+      <div id="http-security-content">
+        <div class="empty-state">
+          <div class="icon">🛡️</div>
+          <p>Click the <strong>HTTP Security</strong> tab to scan security headers, CORS, cookies and more.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Network Security Tab -->
+    <div class="tab-panel" id="tab-network-security">
+      <div id="network-security-content">
+        <div class="empty-state">
+          <div class="icon">🔌</div>
+          <p>Click the <strong>Network &amp; Ports</strong> tab to run port scans, SSH and SMTP probes.</p>
+        </div>
+      </div>
+    </div>
+
   </div><!-- /#results -->
 
 </div><!-- /.shell -->
@@ -961,6 +983,10 @@ let currentFilter = 'all';
 let logLines = 0;
 let dnsSecLoaded = false;
 let dnsSecData = null;
+let httpSecLoaded = false;
+let httpSecData = null;
+let networkSecLoaded = false;
+let networkSecData = null;
 
 // ─── Demo / API bridge ───────────────────────────────────────────────────────
 // When running standalone (no server), we simulate via the Anthropic API
@@ -983,6 +1009,10 @@ async function startScan() {
   document.getElementById('scan-btn').textContent = '⏳ Scanning...';
   dnsSecLoaded = false;
   dnsSecData = null;
+  httpSecLoaded = false;
+  httpSecData = null;
+  networkSecLoaded = false;
+  networkSecData = null;
 
   const bar = document.getElementById('progress-bar');
   const fill = document.getElementById('progress-fill');
@@ -1693,46 +1723,171 @@ function renderDNSSecurity(data) {
     </div>`;
 }
 
+// ─── HTTP Security Tab ────────────────────────────────────────────────────────
+async function loadHTTPSecurity() {
+  if (!scanData || httpSecLoaded) return;
+  const container = document.getElementById('http-security-content');
+  container.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text2)"><div style="font-size:32px;margin-bottom:12px">⏳</div><p>Scanning HTTP security headers, CORS, cookies, methods…</p></div>`;
+  try {
+    const resp = await fetch('/api/http-scan', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ domain: scanData.summary.domain, hosts: scanData.hosts.filter(h => h.tls?.cipher) })
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    httpSecData = await resp.json();
+    httpSecLoaded = true;
+    renderSecurityTab('http-security-content', httpSecData, 'HTTP Security', [
+      { label:'HSTS Missing',       value: httpSecData.summary?.missingHSTS,      bad: v=>v>0 },
+      { label:'CSP Missing',        value: httpSecData.summary?.missingCSP,       bad: v=>v>0 },
+      { label:'CORS Issues',        value: httpSecData.summary?.corsIssues,       bad: v=>v>0 },
+      { label:'Cookie Issues',      value: httpSecData.summary?.cookieIssues,     bad: v=>v>0 },
+      { label:'TRACE Enabled',      value: httpSecData.summary?.traceEnabled?1:0, bad: v=>v>0 },
+      { label:'GraphQL Exposed',    value: httpSecData.summary?.graphqlExposed?1:0, bad: v=>v>0 },
+      { label:'Server Disclosed',   value: httpSecData.summary?.serverDisclosure?.length||0, bad: v=>v>0 },
+    ]);
+  } catch(e) {
+    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>HTTP scan failed: ${e.message}</p></div>`;
+  }
+}
+
+// ─── Network Security Tab ─────────────────────────────────────────────────────
+async function loadNetworkSecurity() {
+  if (!scanData || networkSecLoaded) return;
+  const container = document.getElementById('network-security-content');
+  container.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text2)"><div style="font-size:32px;margin-bottom:12px">⏳</div><p>Port scanning, probing SSH algorithms, testing SMTP STARTTLS…</p><p style="font-size:12px;margin-top:8px;color:var(--muted)">This may take 30–60 seconds</p></div>`;
+  try {
+    const resp = await fetch('/api/network-scan', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ domain: scanData.summary.domain, hosts: scanData.hosts.filter(h => h.dns?.resolves) })
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    networkSecData = await resp.json();
+    networkSecLoaded = true;
+
+    // Build open ports summary
+    const openPorts = networkSecData.report?.portScans?.flatMap(s => s.openPorts.map(p => ({...p, hostname: s.hostname}))) || [];
+
+    renderSecurityTab('network-security-content', networkSecData, 'Network & Protocol Security', [
+      { label:'IPs Scanned',        value: networkSecData.summary?.ipsScanned,       bad: ()=>false },
+      { label:'Open Ports',         value: networkSecData.summary?.openPortsTotal,    bad: v=>v>3 },
+      { label:'Critical Ports',     value: networkSecData.summary?.criticalPorts,     bad: v=>v>0 },
+      { label:'SSH Hosts',          value: networkSecData.summary?.sshHostsScanned,   bad: ()=>false },
+      { label:'SSH PQ-Ready',       value: networkSecData.summary?.sshPQReady,        bad: v=>networkSecData.summary?.sshHostsScanned>0&&v<networkSecData.summary?.sshHostsScanned },
+      { label:'SMTP STARTTLS',      value: networkSecData.summary?.smtpStartTLS,      bad: v=>networkSecData.summary?.smtpHostsScanned>0&&v<networkSecData.summary?.smtpHostsScanned },
+    ], openPorts);
+  } catch(e) {
+    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Network scan failed: ${e.message}</p></div>`;
+  }
+}
+
+// ─── Generic security tab renderer ───────────────────────────────────────────
+function renderSecurityTab(containerId, data, title, stats, extraData) {
+  const container = document.getElementById(containerId);
+  const { findings } = data;
+  const sevOrder = ['critical','high','medium','low','info'];
+  const sorted = [...findings].sort((a,b) => sevOrder.indexOf(a.severity) - sevOrder.indexOf(b.severity));
+  const sevColour = {critical:'var(--danger)',high:'var(--warn)',medium:'var(--accent)',low:'var(--ok)',info:'var(--muted)'};
+  const sevBg = {critical:'rgba(255,61,110,0.08)',high:'rgba(255,170,0,0.08)',medium:'rgba(0,180,216,0.08)',low:'rgba(0,229,160,0.08)',info:'rgba(74,85,104,0.1)'};
+
+  const statsHTML = stats.map(s => {
+    const bad = s.bad(s.value);
+    return `<div class="stat-card">
+      <div class="stat-label">${s.label}</div>
+      <div style="font-size:28px;font-weight:800;font-family:var(--font-mono);color:${bad?'var(--danger)':'var(--ok)'};line-height:1.2;margin:4px 0">${s.value??'—'}</div>
+    </div>`;
+  }).join('');
+
+  // Open ports table (for network scan)
+  let portsHTML = '';
+  if (extraData?.length > 0) {
+    portsHTML = `
+      <div class="host-table-card" style="margin-bottom:16px">
+        <div class="section-header"><h3>Open Ports</h3></div>
+        <table><thead><tr><th>Host</th><th>Port</th><th>Protocol</th><th>Banner</th></tr></thead>
+        <tbody>${extraData.slice(0,30).map(p=>`
+          <tr>
+            <td>${p.hostname}</td>
+            <td style="color:${['21','23','445','3389','1433','3306','5432','9200','27017','6379','2375','6443'].includes(String(p.port))?'var(--danger)':'var(--text)'};font-weight:bold">${p.port}</td>
+            <td>${p.proto}</td>
+            <td style="font-size:10px;color:var(--muted)">${(p.banner||'').slice(0,50)}</td>
+          </tr>`).join('')}
+        </tbody></table>
+      </div>`;
+  }
+
+  const findingsHTML = sorted.length === 0
+    ? '<div class="empty-state"><div class="icon">✓</div><p>No findings.</p></div>'
+    : sorted.map((f,i) => `
+      <div class="finding-item" onclick="toggleFinding('sec${containerId}${i}')">
+        <div class="finding-host">${f.hostname||''}</div>
+        <div class="finding-header">
+          <span class="sev-badge sev-${f.severity}">${f.severity}</span>
+          <span class="finding-title">${f.title}</span>
+        </div>
+        <div class="finding-detail" id="sec${containerId}${i}">
+          <p>${f.detail}</p>
+          ${f.recommendation?`<div class="finding-rec">→ ${f.recommendation}</div>`:''}
+          ${f.nistRef?`<div class="finding-nist">NIST: ${f.nistRef}</div>`:''}
+          ${f.priority?`<div class="finding-nist">Priority: ${f.priority}</div>`:''}
+        </div>
+      </div>`).join('');
+
+  container.innerHTML = `
+    <div class="summary-grid" style="margin-bottom:20px">${statsHTML}</div>
+    ${portsHTML}
+    <div class="findings-section">
+      <div class="section-header"><h3>${title} Findings</h3><span class="count-badge">${sorted.filter(f=>f.severity!=='info').length}</span></div>
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;padding:12px 20px;border-bottom:1px solid var(--border)">
+        ${['critical','high','medium','low','info'].map(s=>`
+          <div style="text-align:center;padding:8px;border-radius:6px;background:${sevBg[s]}">
+            <div style="font-size:22px;font-weight:800;color:${sevColour[s]};font-family:var(--font-mono)">${findings.filter(f=>f.severity===s).length}</div>
+            <div style="font-size:10px;text-transform:uppercase;color:${sevColour[s]};letter-spacing:.08em">${s}</div>
+          </div>`).join('')}
+      </div>
+      ${findingsHTML}
+    </div>`;
+}
+
 // ─── Report Download ──────────────────────────────────────────────────────────
 async function downloadReport() {
   if (!scanData) return;
 
   const btn = document.getElementById('report-btn');
   const status = document.getElementById('report-status');
-
   btn.disabled = true;
   btn.textContent = '⏳ Generating report…';
 
-  // If DNS scan hasn't run yet, offer to run it first or skip
-  if (!dnsSecData) {
-    status.textContent = 'Running DNS security scan to include in report…';
+  const runIfMissing = async (data, endpoint, body, label) => {
+    if (data) return data;
+    status.textContent = `Running ${label} scan…`;
     status.style.color = 'var(--accent)';
     try {
-      const resp = await fetch('/api/dns-scan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          domain: scanData.summary.domain,
-          hosts: scanData.hosts.filter(h => h.dns?.resolves),
-        }),
-      });
-      if (resp.ok) {
-        dnsSecData = await resp.json();
-        dnsSecLoaded = true;
-      }
-    } catch (e) {
-      // DNS scan failed — continue without it
-    }
-  }
+      const r = await fetch(endpoint, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      if (r.ok) return await r.json();
+    } catch {}
+    return null;
+  };
 
-  status.textContent = `Building report${dnsSecData ? ' with DNS security section' : ''}…`;
+  const hostPayload = scanData.hosts.filter(h => h.dns?.resolves);
+  const tlsHosts   = scanData.hosts.filter(h => h.tls?.cipher);
+
+  dnsSecData     = await runIfMissing(dnsSecData,     '/api/dns-scan',     { domain: scanData.summary.domain, hosts: hostPayload }, 'DNS security');
+  httpSecData    = await runIfMissing(httpSecData,    '/api/http-scan',    { domain: scanData.summary.domain, hosts: tlsHosts }, 'HTTP security');
+  networkSecData = await runIfMissing(networkSecData, '/api/network-scan', { domain: scanData.summary.domain, hosts: hostPayload }, 'network');
+
+  status.textContent = 'Building full assessment report…';
   status.style.color = 'var(--text2)';
 
   try {
     const response = await fetch('/api/report', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scanResult: scanData, dnsData: dnsSecData || null }),
+      body: JSON.stringify({
+        scanResult:  scanData,
+        dnsData:     dnsSecData     || null,
+        httpData:    httpSecData    || null,
+        networkData: networkSecData || null,
+      }),
     });
 
     if (!response.ok) {
@@ -1740,19 +1895,16 @@ async function downloadReport() {
       throw new Error(err.error || `HTTP ${response.status}`);
     }
 
-    // Get filename from Content-Disposition header
     const disposition = response.headers.get('Content-Disposition') || '';
     const match = disposition.match(/filename="([^"]+)"/);
     const filename = match ? match[1] : `CipherQ_QTA_${scanData.summary.domain}.docx`;
 
-    // Trigger download
     const blob = await response.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
 

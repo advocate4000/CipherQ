@@ -271,7 +271,7 @@ function buildCoverPage(summary) {
 
 // ─── Executive summary ────────────────────────────────────────────────────────
 
-function buildExecutiveSummary(summary, findings, dnsData) {
+function buildExecutiveSummary(summary, findings, dnsData, httpData, networkData) {
   const sev = summary.findingsBySeverity;
   const critHigh = sev.critical + sev.high;
   const hndlHigh = summary.overallHndlRisk.startsWith('high');
@@ -327,7 +327,7 @@ function buildExecutiveSummary(summary, findings, dnsData) {
           headerCell('BUSINESS IMPACT',   2000),
           headerCell('PRIORITY',          2060),
         ]}),
-        ...buildPriorityRows(summary, findings, dnsData),
+        ...buildPriorityRows(summary, findings, dnsData, httpData, networkData),
       ],
     }),
   ].filter(Boolean);
@@ -590,19 +590,26 @@ function buildDNSSection(dnsData) {
   return children;
 }
 
-// ─── Update buildPriorityRows to accept DNS data ──────────────────────────────
+function buildPriorityRows(summary, findings, dnsData, httpData, networkData) {
+  const ds  = dnsData?.report?.summary     || {};
+  const hs  = httpData?.summary            || {};
+  const ns  = networkData?.summary         || {};
 
-function buildPriorityRows(summary, findings, dnsData) {
-  const ds = dnsData?.report?.summary || {};
   const areas = [
     { area: 'TLS key exchange — PQ readiness',        status: 'Live',    impact: 'High',      priority: 'P1 — Immediate',  impactCol: COLOURS.danger },
     { area: 'Certificate authority posture',           status: 'Live',    impact: 'Medium',    priority: 'P2 — Near-term',  impactCol: COLOURS.warn },
     { area: 'SNI / certificate matching',             status: summary.sniMismatches?.length > 0 ? 'Finding' : 'Clear', impact: 'Medium', priority: summary.sniMismatches?.length > 0 ? 'P1 — Immediate' : 'None', impactCol: COLOURS.warn },
+    { area: 'HTTP security headers',                  status: hs.missingHSTS > 0 || hs.missingCSP > 0 ? 'Findings' : httpData ? 'Clear' : 'Not tested', impact: hs.missingHSTS > 0 ? 'High' : 'Low', priority: hs.missingHSTS > 0 ? 'P1 — Immediate' : hs.missingCSP > 0 ? 'P2 — Near-term' : 'None', impactCol: hs.missingHSTS > 0 ? COLOURS.danger : COLOURS.warn },
+    { area: 'CORS misconfiguration',                  status: hs.corsIssues > 0 ? `${hs.corsIssues} issue(s)` : httpData ? 'Clear' : 'Not tested', impact: hs.corsIssues > 0 ? 'High' : 'None', priority: hs.corsIssues > 0 ? 'P1 — Immediate' : 'None', impactCol: hs.corsIssues > 0 ? COLOURS.danger : COLOURS.ok },
     { area: 'DNS zone transfer (AXFR)',               status: ds.axfrVulnerable ? 'VULNERABLE' : dnsData ? 'Clear' : 'Not tested', impact: ds.axfrVulnerable ? 'Critical' : 'None', priority: ds.axfrVulnerable ? 'P1 — Immediate' : 'None', impactCol: ds.axfrVulnerable ? COLOURS.danger : COLOURS.ok },
-    { area: 'Email authentication (SPF/DKIM/DMARC)',  status: (!ds.spfPresent || ds.dmarcPolicy === 'missing' || ds.dmarcPolicy === undefined) ? 'Finding' : ds.dmarcPolicy === 'reject' ? 'Clear' : 'Partial', impact: (!ds.spfPresent || !ds.dmarcPolicy) ? 'High' : 'Low', priority: (!ds.spfPresent || !ds.dmarcPolicy) ? 'P1 — Immediate' : 'P2 — Near-term', impactCol: (!ds.spfPresent) ? COLOURS.danger : COLOURS.warn },
+    { area: 'Email authentication (SPF/DKIM/DMARC)',  status: (!ds.spfPresent || !ds.dmarcPolicy) ? 'Finding' : ds.dmarcPolicy === 'reject' ? 'Clear' : 'Partial', impact: (!ds.spfPresent || !ds.dmarcPolicy) ? 'High' : 'Low', priority: (!ds.spfPresent || !ds.dmarcPolicy) ? 'P1 — Immediate' : 'P2 — Near-term', impactCol: (!ds.spfPresent) ? COLOURS.danger : COLOURS.warn },
     { area: 'DNSSEC',                                 status: ds.dnssecDeployed ? 'Deployed' : dnsData ? 'Not deployed' : 'Not tested', impact: ds.dnssecDeployed ? 'None' : 'Medium', priority: ds.dnssecDeployed ? 'None' : 'P2 — Near-term', impactCol: ds.dnssecDeployed ? COLOURS.ok : COLOURS.warn },
     { area: 'Subdomain takeover risk',                status: ds.takeoverCount > 0 ? `${ds.takeoverCount} vulnerable` : ds.danglingCNAMECount > 0 ? `${ds.danglingCNAMECount} dangling` : dnsData ? 'Clear' : 'Not tested', impact: ds.takeoverCount > 0 ? 'Critical' : ds.danglingCNAMECount > 0 ? 'High' : 'None', priority: ds.takeoverCount > 0 ? 'P1 — Immediate' : ds.danglingCNAMECount > 0 ? 'P1 — Immediate' : 'None', impactCol: ds.takeoverCount > 0 ? COLOURS.danger : COLOURS.ok },
     { area: 'CAA records',                            status: ds.caaPresent ? 'Present' : dnsData ? 'Missing' : 'Not tested', impact: ds.caaPresent ? 'None' : 'Medium', priority: ds.caaPresent ? 'None' : 'P2 — Near-term', impactCol: ds.caaPresent ? COLOURS.ok : COLOURS.warn },
+    { area: 'SSH post-quantum readiness',             status: ns.sshHostsScanned > 0 ? (ns.sshPQReady === ns.sshHostsScanned ? 'All hosts ready' : `${ns.sshPQReady}/${ns.sshHostsScanned} ready`) : networkData ? 'No SSH found' : 'Not tested', impact: ns.sshHostsScanned > 0 && ns.sshPQReady < ns.sshHostsScanned ? 'High' : 'None', priority: ns.sshHostsScanned > 0 && ns.sshPQReady < ns.sshHostsScanned ? 'P1 — Immediate' : 'None', impactCol: ns.sshPQReady < ns.sshHostsScanned ? COLOURS.danger : COLOURS.ok },
+    { area: 'Critical services exposed (ports)',      status: ns.criticalPorts > 0 ? `${ns.criticalPorts} critical port(s)` : networkData ? 'Clear' : 'Not tested', impact: ns.criticalPorts > 0 ? 'Critical' : 'None', priority: ns.criticalPorts > 0 ? 'P1 — Immediate' : 'None', impactCol: ns.criticalPorts > 0 ? COLOURS.danger : COLOURS.ok },
+    { area: 'SMTP STARTTLS enforcement',              status: ns.smtpHostsScanned > 0 ? (ns.smtpStartTLS === ns.smtpHostsScanned ? 'All enforced' : 'Issues found') : networkData ? 'No SMTP found' : 'Not tested', impact: ns.smtpHostsScanned > 0 && ns.smtpStartTLS < ns.smtpHostsScanned ? 'Medium' : 'None', priority: 'None', impactCol: COLOURS.warn },
+    { area: 'Cookie security flags',                  status: hs.cookieIssues > 0 ? `${hs.cookieIssues} issue(s)` : httpData ? 'Clear' : 'Not tested', impact: hs.cookieIssues > 0 ? 'Medium' : 'None', priority: hs.cookieIssues > 0 ? 'P2 — Near-term' : 'None', impactCol: hs.cookieIssues > 0 ? COLOURS.warn : COLOURS.ok },
     { area: 'Externally exposed dev infrastructure',  status: summary.devHostsExposed?.length > 0 ? 'Finding' : 'Clear', impact: summary.devHostsExposed?.length > 0 ? 'Medium' : 'None', priority: summary.devHostsExposed?.length > 0 ? 'P1 — Immediate' : 'None', impactCol: COLOURS.warn },
     { area: 'DNS surface / dormant subdomains',       status: summary.hostsUnreachable > 0 ? 'Finding' : 'Clear', impact: 'Low–Medium', priority: summary.hostsUnreachable > 0 ? 'P2 — Near-term' : 'None', impactCol: COLOURS.ok },
   ];
@@ -937,7 +944,236 @@ function buildControlMapping() {
 
 // ─── Main generator ───────────────────────────────────────────────────────────
 
-async function generateReport(scanResult, dnsData = null) {
+// ─── HTTP Security Section ────────────────────────────────────────────────────
+
+function buildHTTPSection(httpData) {
+  if (!httpData?.findings) return [];
+  const { findings, summary } = httpData;
+  const sevOrder = ['critical','high','medium','low','info'];
+  const sorted = [...findings].sort((a,b) => sevOrder.indexOf(a.severity) - sevOrder.indexOf(b.severity));
+  const nonInfo = sorted.filter(f => f.severity !== 'info');
+
+  const children = [
+    sectionHeading('HTTP Security Assessment'),
+    bodyText(
+      `This section presents the results of the HTTP security assessment, covering security response headers, CORS policy, ` +
+      `cookie security flags, permitted HTTP methods, redirect chain integrity, and API exposure.`
+    ),
+    spacer(8),
+
+    // Overview table
+    sectionHeading('HTTP Security Posture Overview', HeadingLevel.HEADING_2),
+    spacer(4),
+    new Table({
+      width: { size: CONTENT_WIDTH, type: WidthType.DXA },
+      columnWidths: [3200, 1800, 2160, 2200],
+      borders: ALL_BORDERS,
+      rows: [
+        new TableRow({ children: [headerCell('CHECK',3200), headerCell('STATUS',1800), headerCell('HOSTS AFFECTED',2160), headerCell('ACTION',2200)] }),
+        ...[
+          { check: 'HSTS (Strict-Transport-Security)', status: summary.missingHSTS > 0 ? 'Issues found' : 'Clear', affected: summary.missingHSTS, action: summary.missingHSTS > 0 ? 'Add max-age≥31536000; includeSubDomains' : 'No action', col: summary.missingHSTS > 0 ? COLOURS.danger : COLOURS.ok },
+          { check: 'Content-Security-Policy', status: summary.missingCSP > 0 ? 'Missing/weak' : 'Clear', affected: summary.missingCSP, action: summary.missingCSP > 0 ? "Add default-src 'self'; object-src 'none'" : 'No action', col: summary.missingCSP > 0 ? COLOURS.danger : COLOURS.ok },
+          { check: 'CORS configuration', status: summary.corsIssues > 0 ? `${summary.corsIssues} misconfiguration(s)` : 'Clear', affected: summary.corsIssues, action: summary.corsIssues > 0 ? 'Restrict to explicit allowlist' : 'No action', col: summary.corsIssues > 0 ? COLOURS.danger : COLOURS.ok },
+          { check: 'Cookie security flags', status: summary.cookieIssues > 0 ? `${summary.cookieIssues} insecure cookie(s)` : 'Clear', affected: summary.cookieIssues, action: summary.cookieIssues > 0 ? 'Add Secure; HttpOnly; SameSite=Strict' : 'No action', col: summary.cookieIssues > 0 ? COLOURS.warn : COLOURS.ok },
+          { check: 'Server version disclosure', status: summary.serverDisclosure?.length > 0 ? 'Disclosing' : 'Clear', affected: summary.serverDisclosure?.length || 0, action: 'Remove Server / X-Powered-By headers', col: summary.serverDisclosure?.length > 0 ? COLOURS.warn : COLOURS.ok },
+          { check: 'HTTP TRACE method', status: summary.traceEnabled ? 'ENABLED' : 'Disabled', affected: summary.traceEnabled ? 1 : 0, action: summary.traceEnabled ? 'Disable TRACE immediately' : 'No action', col: summary.traceEnabled ? COLOURS.warn : COLOURS.ok },
+          { check: 'GraphQL introspection', status: summary.graphqlExposed ? 'EXPOSED' : 'Not detected', affected: summary.graphqlExposed ? 1 : 0, action: summary.graphqlExposed ? 'Disable in production' : 'No action', col: summary.graphqlExposed ? COLOURS.warn : COLOURS.ok },
+        ].map((r,i) => new TableRow({ children: [
+          cell(r.check,    {width:3200, bg: i%2===0?COLOURS.white:COLOURS.lightGrey, bold:true, fontSize:18}),
+          cell(r.status,   {width:1800, bg: i%2===0?COLOURS.white:COLOURS.lightGrey, color:r.col, bold:r.affected>0, fontSize:18}),
+          cell(String(r.affected||'—'), {width:2160, bg: i%2===0?COLOURS.white:COLOURS.lightGrey, fontSize:18}),
+          cell(r.action,   {width:2200, bg: i%2===0?COLOURS.white:COLOURS.lightGrey, fontSize:16}),
+        ]})),
+      ],
+    }),
+    spacer(12),
+
+    // Findings
+    sectionHeading('HTTP Security Findings', HeadingLevel.HEADING_2),
+    spacer(4),
+  ];
+
+  // Severity bar
+  const sevCounts = {};
+  for (const f of findings) sevCounts[f.severity] = (sevCounts[f.severity]||0)+1;
+  children.push(new Table({
+    width:{size:CONTENT_WIDTH,type:WidthType.DXA},columnWidths:[1872,1872,1872,1872,1872],borders:ALL_BORDERS,
+    rows:[new TableRow({children:['CRITICAL','HIGH','MEDIUM','LOW','INFO'].map(s=>{
+      const k=s.toLowerCase(); const style=SEV_STYLE[k];
+      return cell([
+        new Paragraph({alignment:AlignmentType.CENTER,children:[new TextRun({text:String(sevCounts[k]||0),bold:true,size:40,color:style.text,font:'Arial'})],spacing:{after:0}}),
+        new Paragraph({alignment:AlignmentType.CENTER,children:[new TextRun({text:s,size:14,color:style.text,font:'Arial'})],spacing:{after:0}}),
+      ],{width:1872,bg:style.bg});
+    })})],
+  }));
+  children.push(spacer(12));
+
+  for (const f of nonInfo) {
+    const style = SEV_STYLE[f.severity] || SEV_STYLE.info;
+    children.push(
+      new Table({width:{size:CONTENT_WIDTH,type:WidthType.DXA},columnWidths:[1400,CONTENT_WIDTH-1400],borders:NO_BORDERS,
+        rows:[new TableRow({children:[
+          cell(style.label,{width:1400,bg:style.text,color:COLOURS.white,bold:true,fontSize:18,borders:NO_BORDERS}),
+          cell(f.title,{width:CONTENT_WIDTH-1400,bg:style.bg,color:style.text,bold:true,fontSize:18,borders:NO_BORDERS}),
+        ]})]}),
+      new Table({width:{size:CONTENT_WIDTH,type:WidthType.DXA},columnWidths:[1800,CONTENT_WIDTH-1800],borders:ALL_BORDERS,
+        rows:[
+          ...(f.hostname?[new TableRow({children:[cell('Host',{width:1800,bg:COLOURS.lightGrey,bold:true,fontSize:18}),cell(f.hostname,{width:CONTENT_WIDTH-1800,fontSize:18})]})]:[]),
+          new TableRow({children:[cell('Area',{width:1800,bg:COLOURS.lightGrey,bold:true,fontSize:18}),cell((f.area||'').replace(/-/g,' ').toUpperCase(),{width:CONTENT_WIDTH-1800,fontSize:18})]}),
+          new TableRow({children:[cell('Detail',{width:1800,bg:COLOURS.lightGrey,bold:true,fontSize:18}),cell([new Paragraph({children:[new TextRun({text:f.detail,size:18,font:'Arial'})],spacing:{after:0}})],{width:CONTENT_WIDTH-1800})]}),
+          ...(f.recommendation?[new TableRow({children:[cell('Recommendation',{width:1800,bg:COLOURS.lightGrey,bold:true,fontSize:18}),cell([new Paragraph({children:[new TextRun({text:f.recommendation,size:18,font:'Arial',color:COLOURS.ok,bold:true})],spacing:{after:0}})],{width:CONTENT_WIDTH-1800})]})]:[]),
+          ...(f.nistRef?[new TableRow({children:[cell('NIST Reference',{width:1800,bg:COLOURS.lightGrey,bold:true,fontSize:18}),cell(f.nistRef,{width:CONTENT_WIDTH-1800,fontSize:16})]})]:[]),
+        ]}),
+      spacer(10),
+    );
+  }
+  return children;
+}
+
+// ─── Network Security Section ─────────────────────────────────────────────────
+
+function buildNetworkSection(networkData) {
+  if (!networkData?.findings) return [];
+  const { findings, summary, report } = networkData;
+  const sevOrder = ['critical','high','medium','low','info'];
+  const sorted = [...findings].sort((a,b) => sevOrder.indexOf(a.severity) - sevOrder.indexOf(b.severity));
+  const nonInfo = sorted.filter(f => f.severity !== 'info');
+
+  const children = [
+    sectionHeading('Network & Protocol Security Assessment'),
+    bodyText(
+      `This section covers the results of port scanning, SSH post-quantum readiness assessment, SMTP STARTTLS analysis, and ` +
+      `IPv6 surface review conducted against the externally-facing infrastructure.`
+    ),
+    spacer(8),
+
+    // Port scan overview
+    sectionHeading('Open Ports Discovered', HeadingLevel.HEADING_2),
+    spacer(4),
+  ];
+
+  // Build port table from all scans
+  const allOpenPorts = (report?.portScans || []).flatMap(s =>
+    s.openPorts.map(p => ({ ...p, hostname: s.hostname, ip: s.ip }))
+  );
+
+  if (allOpenPorts.length === 0) {
+    children.push(bodyText('No unexpected open ports detected beyond standard web ports (80, 443).'));
+  } else {
+    children.push(new Table({
+      width:{size:CONTENT_WIDTH,type:WidthType.DXA},
+      columnWidths:[2400,900,1200,1500,3360],borders:ALL_BORDERS,
+      rows:[
+        new TableRow({children:[headerCell('Hostname',2400),headerCell('Port',900),headerCell('Protocol',1200),headerCell('Severity',1500),headerCell('Assessment',3360)]}),
+        ...allOpenPorts.slice(0,30).map((p,i)=>{
+          const def = {severity:'info',note:'Service detected'};
+          const col = p.severity==='critical'?COLOURS.danger:p.severity==='high'?COLOURS.warn:COLOURS.ok;
+          const bg = i%2===0?COLOURS.white:COLOURS.lightGrey;
+          return new TableRow({children:[
+            cell(p.hostname,{width:2400,bg,fontSize:16}),
+            cell(String(p.port),{width:900,bg,fontSize:18,bold:true}),
+            cell(p.proto,{width:1200,bg,fontSize:16}),
+            cell((p.severity||'info').toUpperCase(),{width:1500,bg:bg,color:col,bold:true,fontSize:16}),
+            cell(p.note||'Open',{width:3360,bg,fontSize:16}),
+          ]});
+        }),
+      ],
+    }));
+  }
+
+  children.push(spacer(12));
+
+  // SSH summary
+  if (report?.sshScans?.length > 0) {
+    children.push(sectionHeading('SSH Security Analysis', HeadingLevel.HEADING_2));
+    children.push(spacer(4));
+    children.push(new Table({
+      width:{size:CONTENT_WIDTH,type:WidthType.DXA},
+      columnWidths:[2800,2000,1500,3060],borders:ALL_BORDERS,
+      rows:[
+        new TableRow({children:[headerCell('Host',2800),headerCell('Banner',2000),headerCell('PQ KEX',1500),headerCell('Key Findings',3060)]}),
+        ...report.sshScans.map((s,i)=>{
+          const hasPQ = s.findings.some(f=>f.id==='SSH-PQ-KEX-PRESENT');
+          const bg = i%2===0?COLOURS.white:COLOURS.lightGrey;
+          const issues = s.findings.filter(f=>f.severity!=='info').map(f=>f.title.slice(0,50)).slice(0,2).join('; ') || 'None';
+          return new TableRow({children:[
+            cell(s.hostname,{width:2800,bg,fontSize:16}),
+            cell((s.banner||'Unknown').slice(0,30),{width:2000,bg,fontSize:14}),
+            cell(hasPQ?'YES':'NO',{width:1500,bg,color:hasPQ?COLOURS.ok:COLOURS.danger,bold:true,fontSize:18}),
+            cell(issues,{width:3060,bg,fontSize:14}),
+          ]});
+        }),
+      ],
+    }));
+    children.push(spacer(12));
+  }
+
+  // SMTP summary
+  if (report?.smtpScans?.length > 0) {
+    children.push(sectionHeading('SMTP STARTTLS Analysis', HeadingLevel.HEADING_2));
+    children.push(spacer(4));
+    children.push(new Table({
+      width:{size:CONTENT_WIDTH,type:WidthType.DXA},
+      columnWidths:[2400,900,1800,1500,2760],borders:ALL_BORDERS,
+      rows:[
+        new TableRow({children:[headerCell('Host',2400),headerCell('Port',900),headerCell('STARTTLS',1800),headerCell('TLS Version',1500),headerCell('Assessment',2760)]}),
+        ...report.smtpScans.map((s,i)=>{
+          const bg=i%2===0?COLOURS.white:COLOURS.lightGrey;
+          return new TableRow({children:[
+            cell(s.hostname,{width:2400,bg,fontSize:16}),
+            cell(String(s.port),{width:900,bg,fontSize:16}),
+            cell(s.starttls?'YES':'NO',{width:1800,bg,color:s.starttls?COLOURS.ok:COLOURS.danger,bold:true,fontSize:18}),
+            cell(s.tls?.protocol||'—',{width:1500,bg,fontSize:16}),
+            cell(s.findings.filter(f=>f.severity!=='info').map(f=>f.title.slice(0,40)).join('; ')||'OK',{width:2760,bg,fontSize:14}),
+          ]});
+        }),
+      ],
+    }));
+    children.push(spacer(12));
+  }
+
+  // Network findings
+  children.push(sectionHeading('Network Security Findings', HeadingLevel.HEADING_2));
+  children.push(spacer(4));
+
+  const sevCounts={};
+  for (const f of findings) sevCounts[f.severity]=(sevCounts[f.severity]||0)+1;
+  children.push(new Table({
+    width:{size:CONTENT_WIDTH,type:WidthType.DXA},columnWidths:[1872,1872,1872,1872,1872],borders:ALL_BORDERS,
+    rows:[new TableRow({children:['CRITICAL','HIGH','MEDIUM','LOW','INFO'].map(s=>{
+      const k=s.toLowerCase();const style=SEV_STYLE[k];
+      return cell([
+        new Paragraph({alignment:AlignmentType.CENTER,children:[new TextRun({text:String(sevCounts[k]||0),bold:true,size:40,color:style.text,font:'Arial'})],spacing:{after:0}}),
+        new Paragraph({alignment:AlignmentType.CENTER,children:[new TextRun({text:s,size:14,color:style.text,font:'Arial'})],spacing:{after:0}}),
+      ],{width:1872,bg:style.bg});
+    })})],
+  }));
+  children.push(spacer(12));
+
+  for (const f of nonInfo) {
+    const style=SEV_STYLE[f.severity]||SEV_STYLE.info;
+    children.push(
+      new Table({width:{size:CONTENT_WIDTH,type:WidthType.DXA},columnWidths:[1400,CONTENT_WIDTH-1400],borders:NO_BORDERS,
+        rows:[new TableRow({children:[
+          cell(style.label,{width:1400,bg:style.text,color:COLOURS.white,bold:true,fontSize:18,borders:NO_BORDERS}),
+          cell(f.title,{width:CONTENT_WIDTH-1400,bg:style.bg,color:style.text,bold:true,fontSize:18,borders:NO_BORDERS}),
+        ]})]}),
+      new Table({width:{size:CONTENT_WIDTH,type:WidthType.DXA},columnWidths:[1800,CONTENT_WIDTH-1800],borders:ALL_BORDERS,
+        rows:[
+          ...(f.hostname?[new TableRow({children:[cell('Host',{width:1800,bg:COLOURS.lightGrey,bold:true,fontSize:18}),cell(f.hostname,{width:CONTENT_WIDTH-1800,fontSize:18})]})]:[]),
+          new TableRow({children:[cell('Area',{width:1800,bg:COLOURS.lightGrey,bold:true,fontSize:18}),cell((f.area||'').replace(/-/g,' ').toUpperCase(),{width:CONTENT_WIDTH-1800,fontSize:18})]}),
+          new TableRow({children:[cell('Detail',{width:1800,bg:COLOURS.lightGrey,bold:true,fontSize:18}),cell([new Paragraph({children:[new TextRun({text:f.detail,size:18,font:'Arial'})],spacing:{after:0}})],{width:CONTENT_WIDTH-1800})]}),
+          ...(f.recommendation?[new TableRow({children:[cell('Recommendation',{width:1800,bg:COLOURS.lightGrey,bold:true,fontSize:18}),cell([new Paragraph({children:[new TextRun({text:f.recommendation,size:18,font:'Arial',color:COLOURS.ok,bold:true})],spacing:{after:0}})],{width:CONTENT_WIDTH-1800})]})]:[]),
+          ...(f.nistRef?[new TableRow({children:[cell('NIST Reference',{width:1800,bg:COLOURS.lightGrey,bold:true,fontSize:18}),cell(f.nistRef,{width:CONTENT_WIDTH-1800,fontSize:16})]})]:[]),
+          ...(f.priority?[new TableRow({children:[cell('Priority',{width:1800,bg:COLOURS.lightGrey,bold:true,fontSize:18}),cell(f.priority,{width:CONTENT_WIDTH-1800,bold:true,color:f.priority==='P1'?COLOURS.danger:COLOURS.warn,fontSize:18})]})]:[]),
+        ]}),
+      spacer(10),
+    );
+  }
+  return children;
+}
+
+async function generateReport(scanResult, dnsData = null, httpData = null, networkData = null) {
   const { summary, hosts, findings } = scanResult;
 
   const scanDate = new Date(summary.scanTime).toLocaleDateString('en-GB', {
@@ -993,9 +1229,11 @@ async function generateReport(scanResult, dnsData = null) {
       footers: { default: makeFooter() },
       children: [
         ...buildCoverPage(summary),
-        ...buildExecutiveSummary(summary, findings, dnsData),
+        ...buildExecutiveSummary(summary, findings, dnsData, httpData, networkData),
         ...buildFindings(findings),
-        ...(dnsData ? buildDNSSection(dnsData) : []),
+        ...(dnsData     ? buildDNSSection(dnsData)         : []),
+        ...(httpData    ? buildHTTPSection(httpData)        : []),
+        ...(networkData ? buildNetworkSection(networkData)  : []),
         ...buildHostInventory(hosts),
         ...buildRoadmap(summary),
         ...buildControlMapping(),
