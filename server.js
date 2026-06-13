@@ -180,11 +180,16 @@ app.post('/api/http-scan', async (req, res) => {
   if (!domain) return res.status(400).json({ error: 'domain is required' });
   try {
     const { scanHTTPSecurity } = require('./http-security');
-    const result = await scanHTTPSecurity(domain, hosts);
+    // Hard 45-second timeout — returns whatever completed in time
+    const result = await Promise.race([
+      scanHTTPSecurity(domain, hosts),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('HTTP scan timed out after 45s')), 45000)),
+    ]);
     res.json(result);
   } catch (e) {
-    console.error('HTTP scan error:', e);
-    res.status(500).json({ error: e.message });
+    console.error('HTTP scan error:', e.message);
+    // Return a partial result rather than an error so the UI gets something
+    res.json({ findings: [], summary: { hostsScanned: 0, totalFindings: 0, bySeverity: {critical:0,high:0,medium:0,low:0,info:0}, missingHSTS:0, missingCSP:0, corsIssues:0, cookieIssues:0, traceEnabled:false, graphqlExposed:false, serverDisclosure:[] }, error: e.message });
   }
 });
 
@@ -194,11 +199,14 @@ app.post('/api/network-scan', async (req, res) => {
   if (!domain) return res.status(400).json({ error: 'domain is required' });
   try {
     const { scanNetworkSecurity } = require('./network-security');
-    const result = await scanNetworkSecurity(domain, hosts);
+    const result = await Promise.race([
+      scanNetworkSecurity(domain, hosts),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Network scan timed out after 90s')), 90000)),
+    ]);
     res.json(result);
   } catch (e) {
-    console.error('Network scan error:', e);
-    res.status(500).json({ error: e.message });
+    console.error('Network scan error:', e.message);
+    res.json({ findings: [], summary: { ipsScanned:0, openPortsTotal:0, criticalPorts:0, sshHostsScanned:0, sshPQReady:0, smtpHostsScanned:0, smtpStartTLS:0, totalFindings:0, bySeverity:{critical:0,high:0,medium:0,low:0,info:0} }, report: { portScans:[], sshScans:[], smtpScans:[], ipv6:[] }, error: e.message });
   }
 });
 

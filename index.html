@@ -1727,7 +1727,7 @@ function renderDNSSecurity(data) {
 async function loadHTTPSecurity() {
   if (!scanData || httpSecLoaded) return;
   const container = document.getElementById('http-security-content');
-  container.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text2)"><div style="font-size:32px;margin-bottom:12px">⏳</div><p>Scanning HTTP security headers, CORS, cookies, methods…</p></div>`;
+  container.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text2)"><div style="font-size:32px;margin-bottom:12px">⏳</div><p>Scanning HTTP security headers, CORS, cookies, methods…</p><p style="font-size:12px;margin-top:8px;color:var(--muted)">Checking ${scanData.hosts.filter(h=>h.tls?.cipher).length} reachable hosts (up to ~20s)</p></div>`;
   try {
     const resp = await fetch('/api/http-scan', {
       method: 'POST', headers: {'Content-Type':'application/json'},
@@ -1736,6 +1736,11 @@ async function loadHTTPSecurity() {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     httpSecData = await resp.json();
     httpSecLoaded = true;
+
+    if (httpSecData.error) {
+      addLog('warn', `HTTP scan: ${httpSecData.error}`);
+    }
+
     renderSecurityTab('http-security-content', httpSecData, 'HTTP Security', [
       { label:'HSTS Missing',       value: httpSecData.summary?.missingHSTS,      bad: v=>v>0 },
       { label:'CSP Missing',        value: httpSecData.summary?.missingCSP,       bad: v=>v>0 },

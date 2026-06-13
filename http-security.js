@@ -184,8 +184,8 @@ function fetchURL(hostname, opts = {}) {
     path     = '/',
     method   = 'GET',
     headers  = {},
-    timeoutMs = 8000,
-    maxBody  = 32768,
+    timeoutMs = 4000,   // reduced from 8000
+    maxBody  = 16384,   // reduced from 32768
   } = opts;
 
   return new Promise((resolve) => {
@@ -348,9 +348,9 @@ async function checkHTTPMethods(hostname) {
   const dangerousMethods = ['TRACE', 'TRACK', 'PUT', 'DELETE', 'CONNECT', 'PATCH'];
   const concerningFound = [];
 
-  // Probe dangerous methods directly
+  // Probe dangerous methods directly — short timeout, all in parallel
   await Promise.all(dangerousMethods.map(async (method) => {
-    const resp = await fetchURL(hostname, { method, timeoutMs: 5000 });
+    const resp = await fetchURL(hostname, { method, timeoutMs: 3000 });
     if (resp && resp.statusCode && resp.statusCode < 405) {
       // 405 = Method Not Allowed; anything else means the server accepted it
       concerningFound.push({ method, statusCode: resp.statusCode });
@@ -403,7 +403,7 @@ async function checkRedirectChain(hostname) {
   const result = { hostname, findings: [], chain: [] };
   let current = `http://${hostname}/`;
   let hops = 0;
-  const maxHops = 10;
+  const maxHops = 4;  // reduced from 10 — practical redirect chains are rarely > 3
   let hadHTTP = false;
   let mixedDomains = false;
 
@@ -415,7 +415,7 @@ async function checkRedirectChain(hostname) {
       port: secure ? 443 : 80,
       path: url.pathname + url.search,
       method: 'HEAD',
-      timeoutMs: 5000,
+      timeoutMs: 3000,
     });
 
     if (!resp) break;
@@ -495,7 +495,7 @@ async function checkGraphQL(hostname) {
     query: '{ __schema { queryType { name } types { name } } }',
   });
 
-  const endpoints = ['/graphql', '/api/graphql', '/gql', '/query', '/api', '/v1/graphql'];
+  const endpoints = ['/graphql', '/api/graphql', '/gql'];
 
   for (const path of endpoints) {
     const resp = await fetchURL(hostname, {
@@ -535,35 +535,50 @@ async function scanHTTPSecurity(domain, hosts, opts = {}) {
 
   const step = (msg) => { if (onProgress) onProgress({ phase: 'http-security', message: msg }); };
 
-  // Get reachable HTTPS hosts
-  const reachableHosts = hosts.filter(h => h.tls?.cipher).map(h => h.hostname);
+  // Get reachable HTTPS hosts — cap at 15 to keep scan fast
+  const reachableHosts = hosts
+    .filter(h => h.tls?.cipher)
+    .map(h => h.hostname)
+    .slice(0, 15);
+
   if (reachableHosts.length === 0) {
     return { findings: [], summary: { hostsScanned: 0 } };
   }
 
-  step(`Scanning HTTP security headers on ${reachableHosts.length} hosts…`);
+  // Slow checks (methods, redirects, GraphQL) only on apex + www to keep scan fast
+  const slowCheckHosts = reachableHosts.filter(h =>
+    h === domain || h === `www.${domain}` || reachableHosts.indexOf(h) < 3
+  ).slice(0, 3);
 
-  // Run all checks concurrently per host, with concurrency cap
-  const concurrency = 5;
+  step(`Scanning ${reachableHosts.length} hosts (deep checks on ${slowCheckHosts.length})…`);
+
   const results = { headers: [], cors: [], methods: [], redirects: [], graphql: [] };
 
+  // Fast checks on all hosts with higher concurrency
+  const concurrency = 10;
   for (let i = 0; i < reachableHosts.length; i += concurrency) {
     const batch = reachableHosts.slice(i, i + concurrency);
     await Promise.all(batch.map(async (hostname) => {
-      const [hdrs, cors, methods, redirects, gql] = await Promise.all([
+      const [hdrs, cors] = await Promise.all([
         checkSecurityHeaders(hostname),
         checkCORS(hostname),
-        checkHTTPMethods(hostname),
-        checkRedirectChain(hostname),
-        checkGraphQL(hostname),
       ]);
       results.headers.push(hdrs);
       results.cors.push(cors);
-      results.methods.push(methods);
-      results.redirects.push(redirects);
-      results.graphql.push(gql);
     }));
   }
+
+  // Slow checks only on apex/www — all run in parallel
+  await Promise.all(slowCheckHosts.map(async (hostname) => {
+    const [methods, redirects, gql] = await Promise.all([
+      checkHTTPMethods(hostname),
+      checkRedirectChain(hostname),
+      checkGraphQL(hostname),
+    ]);
+    results.methods.push(methods);
+    results.redirects.push(redirects);
+    results.graphql.push(gql);
+  }));
 
   // Flatten findings with hostname
   for (const category of Object.values(results)) {
@@ -584,12 +599,12 @@ async function scanHTTPSecurity(domain, hosts, opts = {}) {
       low:      allFindings.filter(f => f.severity === 'low').length,
       info:     allFindings.filter(f => f.severity === 'info').length,
     },
-    missingHSTS:     allFindings.filter(f => f.id === 'HDR-STRICT-TRANSPORT-SECURITY').length,
-    missingCSP:      allFindings.filter(f => f.id === 'HDR-CONTENT-SECURITY-POLICY').length,
-    corsIssues:      allFindings.filter(f => f.area === 'cors' && f.severity !== 'info').length,
-    cookieIssues:    allFindings.filter(f => f.area === 'cookie-security').length,
-    traceEnabled:    allFindings.some(f => f.id === 'HTTP-TRACE-ENABLED'),
-    graphqlExposed:  allFindings.some(f => f.id === 'API-GRAPHQL-INTROSPECTION'),
+    missingHSTS:      allFindings.filter(f => f.id === 'HDR-STRICT_TRANSPORT_SECURITY').length,
+    missingCSP:       allFindings.filter(f => f.id === 'HDR-CONTENT_SECURITY_POLICY').length,
+    corsIssues:       allFindings.filter(f => f.area === 'cors' && f.severity !== 'info').length,
+    cookieIssues:     allFindings.filter(f => f.area === 'cookie-security').length,
+    traceEnabled:     allFindings.some(f => f.id === 'HTTP-TRACE-ENABLED'),
+    graphqlExposed:   allFindings.some(f => f.id === 'API-GRAPHQL-INTROSPECTION'),
     serverDisclosure: allFindings.filter(f => f.id === 'HDR-SERVER-DISCLOSURE').map(f => f.hostname),
   };
 
