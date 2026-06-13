@@ -112,9 +112,14 @@ app.post('/api/scan', async (req, res) => {
     customHosts: customHosts || [],
     deepLegacyProbe: deepLegacy,
     weakCipherProbe: weakCipher,
-    concurrency: 5,
-    onProgress: ({ completed, total, latest }) => {
-      job.progress = { completed, total };
+    concurrency: 8,
+    useCTLog: true,
+    onProgress: ({ phase, completed, total, message, latest }) => {
+      if (phase === 'ct-discovery') {
+        job.progress = { phase: 'ct-discovery', message: message || 'Querying Certificate Transparency logs…' };
+      } else {
+        job.progress = { completed, total };
+      }
     },
   }).then(result => {
     job.status = 'complete';
@@ -162,7 +167,20 @@ app.get('/api/hosts/:domain', async (req, res) => {
   res.json({ domain: req.params.domain, hosts, count: hosts.length });
 });
 
-// ─── POST /api/report — Generate DOCX report from scan results ────────────────
+// ─── POST /api/dns-scan — DNS vulnerability scan ──────────────────────────────
+app.post('/api/dns-scan', async (req, res) => {
+  const { domain, hosts = [] } = req.body;
+  if (!domain) return res.status(400).json({ error: 'domain is required' });
+
+  try {
+    const { scanDNSSecurity } = require('./dns-security');
+    const result = await scanDNSSecurity(domain, hosts);
+    res.json(result);
+  } catch (e) {
+    console.error('DNS scan error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
 app.post('/api/report', async (req, res) => {
   const scanResult = req.body;
   if (!scanResult || !scanResult.summary) {

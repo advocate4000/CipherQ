@@ -865,6 +865,7 @@
       <button class="results-tab" onclick="showTab('tab-hosts', this)">Host Detail</button>
       <button class="results-tab" onclick="showTab('tab-dns', this)">DNS Surface</button>
       <button class="results-tab" onclick="showTab('tab-roadmap', this)">Roadmap</button>
+      <button class="results-tab" onclick="showTab('tab-dns-security', this); loadDNSSecurity()">DNS Security</button>
     </div>
 
     <!-- Findings Tab -->
@@ -938,6 +939,16 @@
       <div class="roadmap" id="roadmap-section"></div>
     </div>
 
+    <!-- DNS Security Tab -->
+    <div class="tab-panel" id="tab-dns-security">
+      <div id="dns-security-content">
+        <div class="empty-state">
+          <div class="icon">🔍</div>
+          <p>Click the <strong>DNS Security</strong> tab to run the DNS vulnerability scan.</p>
+        </div>
+      </div>
+    </div>
+
   </div><!-- /#results -->
 
 </div><!-- /.shell -->
@@ -948,6 +959,7 @@ let pollTimer = null;
 let scanData = null;
 let currentFilter = 'all';
 let logLines = 0;
+let dnsSecLoaded = false;
 
 // ─── Demo / API bridge ───────────────────────────────────────────────────────
 // When running standalone (no server), we simulate via the Anthropic API
@@ -968,6 +980,7 @@ async function startScan() {
   document.getElementById('results').classList.remove('visible');
   document.getElementById('scan-btn').disabled = true;
   document.getElementById('scan-btn').textContent = '⏳ Scanning...';
+  dnsSecLoaded = false;
 
   const bar = document.getElementById('progress-bar');
   const fill = document.getElementById('progress-fill');
@@ -1162,12 +1175,24 @@ async function runServerScan(domain, customHosts, fill, label) {
     await new Promise(r => setTimeout(r, 1500));
     const poll = await fetch(`/api/scan/${jobId}`).then(r => r.json());
     if (poll.progress) {
-      const pct = Math.round((poll.progress.completed / (poll.progress.total || 1)) * 100);
-      fill.style.width = `${pct}%`;
-      label.textContent = `Probing ${poll.progress.completed} / ${poll.progress.total} hosts…`;
-      addLog('info', `Progress: ${poll.progress.completed}/${poll.progress.total}`);
+      if (poll.progress.phase === 'ct-discovery') {
+        fill.style.width = '8%';
+        label.textContent = '🔍 Querying Certificate Transparency logs (crt.sh)…';
+        addLog('info', 'CT log discovery in progress…');
+      } else if (poll.progress.completed != null) {
+        const pct = 10 + Math.round((poll.progress.completed / (poll.progress.total || 1)) * 88);
+        fill.style.width = `${pct}%`;
+        label.textContent = `Probing ${poll.progress.completed} / ${poll.progress.total} hosts…`;
+        addLog('info', `Progress: ${poll.progress.completed}/${poll.progress.total}`);
+      }
     }
     if (poll.status === 'complete') {
+      const ct = poll.result?.summary?.ctLog;
+      if (ct?.enabled && ct.hostsDiscovered > 0) {
+        addLog('ok', `CT log: ${ct.hostsDiscovered} subdomains discovered from ${ct.totalCerts} certificates`);
+      } else if (ct?.error) {
+        addLog('warn', `CT log unavailable: ${ct.error} — wordlist only`);
+      }
       renderResults(poll.result);
       break;
     }
@@ -1182,12 +1207,18 @@ function renderResults(data) {
 
   // Summary cards
   const sev = summary.findingsBySeverity;
+  const ct = summary.ctLog || {};
   const grid = document.getElementById('summary-grid');
   grid.innerHTML = `
     <div class="stat-card">
       <div class="stat-label">Hosts Probed</div>
       <div class="stat-value stat-accent">${summary.hostsProbed}</div>
       <div class="stat-sub">${summary.hostsReachable} reachable</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">CT Log Discovery</div>
+      <div class="stat-value ${ct.enabled && !ct.error ? 'stat-ok' : 'stat-warn'}">${ct.enabled && !ct.error ? ct.hostsDiscovered : '—'}</div>
+      <div class="stat-sub">${ct.enabled && !ct.error ? `from ${ct.totalCerts} certificates` : ct.error ? 'unavailable' : 'disabled'}</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Critical Findings</div>
@@ -1314,10 +1345,6 @@ function filterFindings(sev, btn) {
   renderFindingsList(scanData.findings, sev);
 }
 
-function toggleFinding(i) {
-  const el = document.getElementById(`fd-${i}`);
-  el.classList.toggle('expanded');
-}
 
 function renderHostTable(hosts) {
   const tbody = document.getElementById('host-tbody');
@@ -1512,6 +1539,118 @@ function showTab(tabId, btn) {
 document.getElementById('domain-input').addEventListener('keydown', e => {
   if (e.key === 'Enter') startScan();
 });
+
+function toggleFinding(id) {
+  // Numeric = TLS findings (fd-N), string = DNS findings (dsN)
+  const elId = typeof id === 'number' ? `fd-${id}` : id;
+  const el = document.getElementById(elId);
+  if (el) el.classList.toggle('expanded');
+}
+
+// ─── DNS Security Tab ─────────────────────────────────────────────────────────
+async function loadDNSSecurity() {
+  if (!scanData || dnsSecLoaded) return;
+
+  const container = document.getElementById('dns-security-content');
+  container.innerHTML = `
+    <div style="text-align:center;padding:40px;color:var(--text2);">
+      <div style="font-size:32px;margin-bottom:12px;">⏳</div>
+      <p>Running DNS vulnerability checks…</p>
+      <p style="font-size:12px;margin-top:8px;color:var(--muted)">Zone transfer · DNSSEC · SPF/DKIM/DMARC · CAA · Subdomain takeover · Open resolvers · PTR</p>
+    </div>`;
+
+  try {
+    const resp = await fetch('/api/dns-scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        domain: scanData.summary.domain,
+        hosts: scanData.hosts.filter(h => h.dns?.resolves),
+      }),
+    });
+
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    dnsSecLoaded = true;
+    renderDNSSecurity(data);
+  } catch (e) {
+    container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>DNS security scan failed: ${e.message}</p></div>`;
+  }
+}
+
+function renderDNSSecurity(data) {
+  const { report, findings } = data;
+  const s = report.summary;
+  const container = document.getElementById('dns-security-content');
+
+  const sevOrder = ['critical','high','medium','low','info'];
+  const sorted = [...findings].sort((a,b) => sevOrder.indexOf(a.severity) - sevOrder.indexOf(b.severity));
+
+  const sevColour = { critical:'var(--danger)', high:'var(--warn)', medium:'var(--accent)', low:'var(--ok)', info:'var(--muted)' };
+  const sevBg = { critical:'rgba(255,61,110,0.08)', high:'rgba(255,170,0,0.08)', medium:'rgba(0,180,216,0.08)', low:'rgba(0,229,160,0.08)', info:'rgba(74,85,104,0.1)' };
+
+  // Status cards
+  const checks = [
+    { label:'Zone Transfer',   icon: s.axfrVulnerable ? '🔴' : '🟢', value: s.axfrVulnerable ? 'VULNERABLE' : 'SECURE',       col: s.axfrVulnerable ? 'var(--danger)' : 'var(--ok)' },
+    { label:'DNSSEC',          icon: s.dnssecDeployed  ? '🟢' : '🟡', value: s.dnssecDeployed  ? 'DEPLOYED'   : 'NOT DEPLOYED', col: s.dnssecDeployed  ? 'var(--ok)'     : 'var(--warn)' },
+    { label:'DMARC Policy',    icon: s.dmarcPolicy === 'reject' ? '🟢' : s.dmarcPolicy === 'quarantine' ? '🟡' : '🔴',
+                                                                         value: (s.dmarcPolicy || 'MISSING').toUpperCase(),
+                                                                         col: s.dmarcPolicy === 'reject' ? 'var(--ok)' : s.dmarcPolicy === 'quarantine' ? 'var(--warn)' : 'var(--danger)' },
+    { label:'SPF',             icon: s.spfPresent ? '🟢' : '🔴',       value: s.spfPresent ? 'PRESENT' : 'MISSING',             col: s.spfPresent ? 'var(--ok)' : 'var(--danger)' },
+    { label:'CAA Records',     icon: s.caaPresent  ? '🟢' : '🟡',      value: s.caaPresent  ? 'PRESENT' : 'MISSING',            col: s.caaPresent  ? 'var(--ok)' : 'var(--warn)' },
+    { label:'Subdomain Takeover', icon: s.takeoverCount > 0 ? '🔴' : '🟢', value: s.takeoverCount > 0 ? `${s.takeoverCount} VULNERABLE` : 'CLEAR', col: s.takeoverCount > 0 ? 'var(--danger)' : 'var(--ok)' },
+    { label:'Dangling CNAMEs', icon: s.danglingCNAMECount > 0 ? '🟡' : '🟢', value: s.danglingCNAMECount > 0 ? `${s.danglingCNAMECount} FOUND` : 'NONE', col: s.danglingCNAMECount > 0 ? 'var(--warn)' : 'var(--ok)' },
+    { label:'Open Resolvers',  icon: s.openResolverCount > 0 ? '🔴' : '🟢', value: s.openResolverCount > 0 ? `${s.openResolverCount} OPEN` : 'SECURE', col: s.openResolverCount > 0 ? 'var(--danger)' : 'var(--ok)' },
+  ];
+
+  const statsHTML = checks.map(c => `
+    <div class="stat-card">
+      <div class="stat-label">${c.label}</div>
+      <div style="font-size:22px;font-weight:800;font-family:var(--font-mono);color:${c.col};line-height:1.2;margin:4px 0">${c.icon} ${c.value}</div>
+    </div>`).join('');
+
+  // Findings list
+  const findingsHTML = sorted.length === 0
+    ? '<div class="empty-state"><div class="icon">✓</div><p>No DNS security findings.</p></div>'
+    : sorted.map((f, i) => `
+      <div class="finding-item" onclick="toggleFinding('ds${i}')">
+        <div class="finding-host">${f.hostname || report.domain}</div>
+        <div class="finding-header">
+          <span class="sev-badge sev-${f.severity}">${f.severity}</span>
+          <span class="finding-title">${f.title}</span>
+        </div>
+        <div class="finding-detail" id="ds${i}">
+          <p>${f.detail}</p>
+          ${f.recommendation ? `<div class="finding-rec">→ ${f.recommendation}</div>` : ''}
+          ${f.nistRef ? `<div class="finding-nist">NIST: ${f.nistRef}</div>` : ''}
+          ${f.priority ? `<div class="finding-nist">Priority: ${f.priority}</div>` : ''}
+        </div>
+      </div>`).join('');
+
+  container.innerHTML = `
+    <div class="summary-grid" style="margin-bottom:20px">${statsHTML}</div>
+
+    <div class="findings-section">
+      <div class="section-header">
+        <h3>DNS Security Findings</h3>
+        <span class="count-badge">${sorted.filter(f=>f.severity!=='info').length}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;padding:12px 20px;border-bottom:1px solid var(--border)">
+        ${['critical','high','medium','low','info'].map(s => `
+          <div style="text-align:center;padding:8px;border-radius:6px;background:${sevBg[s]}">
+            <div style="font-size:22px;font-weight:800;color:${sevColour[s]};font-family:var(--font-mono)">${findings.filter(f=>f.severity===s).length}</div>
+            <div style="font-size:10px;text-transform:uppercase;color:${sevColour[s]};letter-spacing:.08em">${s}</div>
+          </div>`).join('')}
+      </div>
+      ${findingsHTML}
+    </div>
+
+    <div style="margin-top:16px;padding:14px 18px;background:var(--surface2);border-radius:8px;border:1px solid var(--border);font-size:12px;color:var(--text2);">
+      <strong style="color:#fff">Checks performed:</strong>
+      Zone transfer (AXFR) · DNSSEC chain of trust · SPF (RFC 7208) · DMARC (RFC 7489) · DKIM (RFC 6376) ·
+      CAA (RFC 8659) · Subdomain takeover (35+ cloud service fingerprints) · Open resolver · PTR / reverse DNS
+    </div>`;
+}
 
 // ─── Report Download ──────────────────────────────────────────────────────────
 async function downloadReport() {
