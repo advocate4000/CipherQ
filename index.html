@@ -960,6 +960,7 @@ let scanData = null;
 let currentFilter = 'all';
 let logLines = 0;
 let dnsSecLoaded = false;
+let dnsSecData = null;
 
 // ─── Demo / API bridge ───────────────────────────────────────────────────────
 // When running standalone (no server), we simulate via the Anthropic API
@@ -981,6 +982,7 @@ async function startScan() {
   document.getElementById('scan-btn').disabled = true;
   document.getElementById('scan-btn').textContent = '⏳ Scanning...';
   dnsSecLoaded = false;
+  dnsSecData = null;
 
   const bar = document.getElementById('progress-bar');
   const fill = document.getElementById('progress-fill');
@@ -1157,42 +1159,80 @@ Weak cipher probe: ${document.getElementById('opt-weak').checked}`;
   renderResults(result);
 }
 
+// ─── CT Log discovery (browser-side, bypasses server egress restrictions) ────
+async function fetchCTHosts(domain, fill, label) {
+  fill.style.width = '8%';
+  label.textContent = '🔍 Querying Certificate Transparency logs (crt.sh)…';
+  addLog('info', `Querying crt.sh for ${domain}…`);
+
+  try {
+    const url = `https://crt.sh/?q=%.${encodeURIComponent(domain)}&output=json`;
+    const resp = await fetch(url, { headers: { 'Accept': 'application/json' } });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const entries = await resp.json();
+
+    const names = new Set();
+    for (const entry of entries) {
+      for (const name of (entry.name_value || '').split('\n')) {
+        const n = name.trim().toLowerCase().replace(/^\*\./, '');
+        if ((n.endsWith(`.${domain}`) || n === domain) && !n.startsWith('*')) {
+          names.add(n);
+        }
+      }
+    }
+
+    const hosts = [...names].sort();
+    addLog('ok', `CT log: ${hosts.length} subdomains from ${entries.length} certificates`);
+    fill.style.width = '12%';
+    return { hosts, totalCerts: entries.length, error: null };
+  } catch (e) {
+    addLog('warn', `CT log unavailable: ${e.message} — wordlist only`);
+    return { hosts: [], totalCerts: 0, error: e.message };
+  }
+}
+
 // ─── Server-based scan ───────────────────────────────────────────────────────
 async function runServerScan(domain, customHosts, fill, label) {
+  // Step 1: CT log discovery runs in the browser (no server egress needed)
+  let ctHosts = [];
+  let ctMeta = { enabled: true, hostsDiscovered: 0, totalCerts: 0, error: null };
+
+  if (customHosts.length === 0) {
+    const ct = await fetchCTHosts(domain, fill, label);
+    ctHosts = ct.hosts;
+    ctMeta = { enabled: true, hostsDiscovered: ct.hosts.length, totalCerts: ct.totalCerts, error: ct.error };
+  }
+
+  // Step 2: Send scan request with CT-discovered hosts merged in
+  fill.style.width = '14%';
+  label.textContent = `Starting TLS probe (${ctHosts.length > 0 ? ctHosts.length + ' CT hosts + wordlist' : 'wordlist'})…`;
+
   const resp = await fetch('/api/scan', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      domain, customHosts,
+      domain,
+      customHosts: customHosts.length > 0 ? customHosts : ctHosts,
       deepLegacy: document.getElementById('opt-legacy').checked,
       weakCipher: document.getElementById('opt-weak').checked,
+      ctHostsFromBrowser: ctHosts,  // server merges these with wordlist
     })
   });
   const { jobId } = await resp.json();
 
-  // Poll
+  // Step 3: Poll for results
   while (true) {
     await new Promise(r => setTimeout(r, 1500));
     const poll = await fetch(`/api/scan/${jobId}`).then(r => r.json());
-    if (poll.progress) {
-      if (poll.progress.phase === 'ct-discovery') {
-        fill.style.width = '8%';
-        label.textContent = '🔍 Querying Certificate Transparency logs (crt.sh)…';
-        addLog('info', 'CT log discovery in progress…');
-      } else if (poll.progress.completed != null) {
-        const pct = 10 + Math.round((poll.progress.completed / (poll.progress.total || 1)) * 88);
-        fill.style.width = `${pct}%`;
-        label.textContent = `Probing ${poll.progress.completed} / ${poll.progress.total} hosts…`;
-        addLog('info', `Progress: ${poll.progress.completed}/${poll.progress.total}`);
-      }
+    if (poll.progress?.completed != null) {
+      const pct = 15 + Math.round((poll.progress.completed / (poll.progress.total || 1)) * 83);
+      fill.style.width = `${pct}%`;
+      label.textContent = `Probing ${poll.progress.completed} / ${poll.progress.total} hosts…`;
+      addLog('info', `Progress: ${poll.progress.completed}/${poll.progress.total}`);
     }
     if (poll.status === 'complete') {
-      const ct = poll.result?.summary?.ctLog;
-      if (ct?.enabled && ct.hostsDiscovered > 0) {
-        addLog('ok', `CT log: ${ct.hostsDiscovered} subdomains discovered from ${ct.totalCerts} certificates`);
-      } else if (ct?.error) {
-        addLog('warn', `CT log unavailable: ${ct.error} — wordlist only`);
-      }
+      // Inject the browser-side CT metadata into the result summary
+      if (poll.result?.summary) poll.result.summary.ctLog = ctMeta;
       renderResults(poll.result);
       break;
     }
@@ -1572,6 +1612,7 @@ async function loadDNSSecurity() {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     dnsSecLoaded = true;
+    dnsSecData = data;
     renderDNSSecurity(data);
   } catch (e) {
     container.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>DNS security scan failed: ${e.message}</p></div>`;
@@ -1661,13 +1702,37 @@ async function downloadReport() {
 
   btn.disabled = true;
   btn.textContent = '⏳ Generating report…';
-  status.textContent = 'Building professional DOCX — this takes a few seconds…';
+
+  // If DNS scan hasn't run yet, offer to run it first or skip
+  if (!dnsSecData) {
+    status.textContent = 'Running DNS security scan to include in report…';
+    status.style.color = 'var(--accent)';
+    try {
+      const resp = await fetch('/api/dns-scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          domain: scanData.summary.domain,
+          hosts: scanData.hosts.filter(h => h.dns?.resolves),
+        }),
+      });
+      if (resp.ok) {
+        dnsSecData = await resp.json();
+        dnsSecLoaded = true;
+      }
+    } catch (e) {
+      // DNS scan failed — continue without it
+    }
+  }
+
+  status.textContent = `Building report${dnsSecData ? ' with DNS security section' : ''}…`;
+  status.style.color = 'var(--text2)';
 
   try {
     const response = await fetch('/api/report', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(scanData),
+      body: JSON.stringify({ scanResult: scanData, dnsData: dnsSecData || null }),
     });
 
     if (!response.ok) {

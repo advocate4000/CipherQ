@@ -85,11 +85,10 @@ function generateJobId() {
 
 // ─── POST /api/scan — Start a scan job ───────────────────────────────────────
 app.post('/api/scan', async (req, res) => {
-  const { domain, customHosts, deepLegacy = true, weakCipher = true } = req.body;
+  const { domain, customHosts, deepLegacy = true, weakCipher = true, ctHostsFromBrowser = [] } = req.body;
 
   if (!domain) return res.status(400).json({ error: 'domain is required' });
 
-  // Basic validation
   const domainRegex = /^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/;
   if (!domainRegex.test(domain)) {
     return res.status(400).json({ error: 'Invalid domain format' });
@@ -97,29 +96,23 @@ app.post('/api/scan', async (req, res) => {
 
   const jobId = generateJobId();
   const job = {
-    id: jobId,
-    domain,
-    status: 'running',
+    id: jobId, domain, status: 'running',
     started: new Date().toISOString(),
     progress: { completed: 0, total: 0 },
-    result: null,
-    error: null,
+    result: null, error: null,
   };
   jobs.set(jobId, job);
 
-  // Run scan asynchronously
   scanDomain(domain, {
-    customHosts: customHosts || [],
+    // If user supplied custom hosts, use those; otherwise merge CT hosts with wordlist on server
+    customHosts: customHosts?.length > 0 ? customHosts : ctHostsFromBrowser,
+    ctHostsFromBrowser,   // passed through so scanDomain can merge with its wordlist
     deepLegacyProbe: deepLegacy,
     weakCipherProbe: weakCipher,
     concurrency: 8,
-    useCTLog: true,
-    onProgress: ({ phase, completed, total, message, latest }) => {
-      if (phase === 'ct-discovery') {
-        job.progress = { phase: 'ct-discovery', message: message || 'Querying Certificate Transparency logs…' };
-      } else {
-        job.progress = { completed, total };
-      }
+    useCTLog: false,       // CT is now done browser-side
+    onProgress: ({ completed, total }) => {
+      job.progress = { completed, total };
     },
   }).then(result => {
     job.status = 'complete';
@@ -182,15 +175,18 @@ app.post('/api/dns-scan', async (req, res) => {
   }
 });
 app.post('/api/report', async (req, res) => {
-  const scanResult = req.body;
-  if (!scanResult || !scanResult.summary) {
+  // Accept either {scanResult, dnsData} envelope or bare scanResult (legacy)
+  const scan    = req.body.scanResult || req.body;
+  const dnsData = req.body.dnsData    || null;
+
+  if (!scan || !scan.summary) {
     return res.status(400).json({ error: 'Valid scan result required in request body.' });
   }
 
   try {
     const { generateReport } = require('./report');
-    const buffer = await generateReport(scanResult);
-    const domain = scanResult.summary.domain.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const buffer = await generateReport(scan, dnsData);
+    const domain = scan.summary.domain.replace(/[^a-zA-Z0-9.-]/g, '_');
     const date = new Date().toISOString().slice(0, 10);
     const filename = `CipherQ_QTA_${domain}_${date}.docx`;
 

@@ -271,7 +271,7 @@ function buildCoverPage(summary) {
 
 // ─── Executive summary ────────────────────────────────────────────────────────
 
-function buildExecutiveSummary(summary, findings) {
+function buildExecutiveSummary(summary, findings, dnsData) {
   const sev = summary.findingsBySeverity;
   const critHigh = sev.critical + sev.high;
   const hndlHigh = summary.overallHndlRisk.startsWith('high');
@@ -327,19 +327,284 @@ function buildExecutiveSummary(summary, findings) {
           headerCell('BUSINESS IMPACT',   2000),
           headerCell('PRIORITY',          2060),
         ]}),
-        ...buildPriorityRows(summary, findings),
+        ...buildPriorityRows(summary, findings, dnsData),
       ],
     }),
   ].filter(Boolean);
 }
 
-function buildPriorityRows(summary, findings) {
+// ─── DNS Security Section ─────────────────────────────────────────────────────
+
+function buildDNSSection(dnsData) {
+  if (!dnsData || !dnsData.report) return [];
+
+  const { report, findings } = dnsData;
+  const s = report.summary;
+  const checks = report.checks || {};
+  const sevOrder = ['critical', 'high', 'medium', 'low', 'info'];
+  const sorted = [...findings].sort((a, b) => sevOrder.indexOf(a.severity) - sevOrder.indexOf(b.severity));
+
+  const children = [
+    sectionHeading('DNS Security Assessment'),
+    bodyText(
+      `This section presents the results of the DNS vulnerability assessment conducted alongside the TLS surface review. ` +
+      `DNS security controls — zone transfer restrictions, DNSSEC, email authentication, CAA records, and subdomain ` +
+      `hygiene — form the foundational layer of trust on which all certificate-based security depends. Weaknesses here ` +
+      `can undermine TLS posture regardless of cryptographic strength.`
+    ),
+    spacer(8),
+
+    // ── Status overview table ─────────────────────────────────────────────────
+    sectionHeading('DNS Security Posture Overview', HeadingLevel.HEADING_2),
+    spacer(4),
+
+    new Table({
+      width: { size: CONTENT_WIDTH, type: WidthType.DXA },
+      columnWidths: [3120, 2080, 2080, 2080],
+      borders: ALL_BORDERS,
+      rows: [
+        new TableRow({ children: [
+          headerCell('CHECK',           3120),
+          headerCell('STATUS',          2080),
+          headerCell('RISK LEVEL',      2080),
+          headerCell('ACTION REQUIRED', 2080),
+        ]}),
+        ...[
+          {
+            check: 'Zone Transfer (AXFR)',
+            status: s.axfrVulnerable ? 'VULNERABLE' : 'SECURE',
+            risk: s.axfrVulnerable ? 'CRITICAL' : 'None',
+            action: s.axfrVulnerable ? 'Restrict AXFR to authorised secondaries immediately' : 'No action required',
+            riskCol: s.axfrVulnerable ? COLOURS.danger : COLOURS.ok,
+          },
+          {
+            check: 'DNSSEC',
+            status: s.dnssecDeployed ? 'DEPLOYED' : 'NOT DEPLOYED',
+            risk: s.dnssecDeployed ? 'None' : 'MEDIUM',
+            action: s.dnssecDeployed ? 'No action required' : 'Enable DNSSEC signing at registrar',
+            riskCol: s.dnssecDeployed ? COLOURS.ok : COLOURS.warn,
+          },
+          {
+            check: 'DMARC Policy',
+            status: (s.dmarcPolicy || 'MISSING').toUpperCase(),
+            risk: s.dmarcPolicy === 'reject' ? 'None' : s.dmarcPolicy === 'quarantine' ? 'LOW' : s.dmarcPolicy === 'none' ? 'MEDIUM' : 'HIGH',
+            action: s.dmarcPolicy === 'reject' ? 'Monitor reports' : s.dmarcPolicy ? `Advance policy from ${s.dmarcPolicy} to reject` : 'Publish DMARC record immediately',
+            riskCol: s.dmarcPolicy === 'reject' ? COLOURS.ok : s.dmarcPolicy === 'quarantine' ? COLOURS.medium : COLOURS.danger,
+          },
+          {
+            check: 'SPF Record',
+            status: s.spfPresent ? 'PRESENT' : 'MISSING',
+            risk: s.spfPresent ? 'None' : 'HIGH',
+            action: s.spfPresent ? 'Verify -all qualifier' : 'Publish SPF record with -all hardfail',
+            riskCol: s.spfPresent ? COLOURS.ok : COLOURS.danger,
+          },
+          {
+            check: 'DKIM Signing',
+            status: (checks.emailSecurity?.dkimSelectors?.length > 0) ? `FOUND (${checks.emailSecurity.dkimSelectors.join(', ')})` : 'NOT DETECTED',
+            risk: (checks.emailSecurity?.dkimSelectors?.length > 0) ? 'None' : 'MEDIUM',
+            action: (checks.emailSecurity?.dkimSelectors?.length > 0) ? 'No action required' : 'Verify DKIM is configured on all mail senders',
+            riskCol: (checks.emailSecurity?.dkimSelectors?.length > 0) ? COLOURS.ok : COLOURS.warn,
+          },
+          {
+            check: 'CAA Records',
+            status: s.caaPresent ? 'PRESENT' : 'MISSING',
+            risk: s.caaPresent ? 'None' : 'MEDIUM',
+            action: s.caaPresent ? 'Add iodef tag for misissuance reports' : 'Publish CAA records restricting certificate issuance',
+            riskCol: s.caaPresent ? COLOURS.ok : COLOURS.warn,
+          },
+          {
+            check: 'Subdomain Takeover',
+            status: s.takeoverCount > 0 ? `${s.takeoverCount} VULNERABLE` : s.danglingCNAMECount > 0 ? `${s.danglingCNAMECount} DANGLING` : 'CLEAR',
+            risk: s.takeoverCount > 0 ? 'CRITICAL' : s.danglingCNAMECount > 0 ? 'HIGH' : 'None',
+            action: s.takeoverCount > 0 ? 'Reclaim or remove dangling DNS records immediately' : s.danglingCNAMECount > 0 ? 'Verify dangling CNAMEs are not claimable' : 'No action required',
+            riskCol: s.takeoverCount > 0 ? COLOURS.danger : s.danglingCNAMECount > 0 ? COLOURS.warn : COLOURS.ok,
+          },
+          {
+            check: 'Open Resolver',
+            status: s.openResolverCount > 0 ? `${s.openResolverCount} OPEN` : 'SECURE',
+            risk: s.openResolverCount > 0 ? 'HIGH' : 'None',
+            action: s.openResolverCount > 0 ? 'Disable recursive resolution on authoritative nameservers' : 'No action required',
+            riskCol: s.openResolverCount > 0 ? COLOURS.danger : COLOURS.ok,
+          },
+        ].map((row, i) => new TableRow({ children: [
+          cell(row.check,  { width: 3120, bg: i % 2 === 0 ? COLOURS.white : COLOURS.lightGrey, bold: true, fontSize: 18 }),
+          cell(row.status, { width: 2080, bg: i % 2 === 0 ? COLOURS.white : COLOURS.lightGrey, fontSize: 18 }),
+          cell(row.risk,   { width: 2080, bg: i % 2 === 0 ? COLOURS.white : COLOURS.lightGrey, color: row.riskCol, bold: row.risk !== 'None', fontSize: 18 }),
+          cell(row.action, { width: 2080, bg: i % 2 === 0 ? COLOURS.white : COLOURS.lightGrey, fontSize: 16 }),
+        ]})),
+      ],
+    }),
+
+    spacer(12),
+
+    // ── Email security detail ─────────────────────────────────────────────────
+    sectionHeading('Email Security Detail', HeadingLevel.HEADING_2),
+    spacer(4),
+  ];
+
+  // SPF detail
+  const spf = checks.emailSecurity?.spf;
+  const dmarc = checks.emailSecurity?.dmarc;
+
+  children.push(new Table({
+    width: { size: CONTENT_WIDTH, type: WidthType.DXA },
+    columnWidths: [2200, CONTENT_WIDTH - 2200],
+    borders: ALL_BORDERS,
+    rows: [
+      new TableRow({ children: [
+        cell('SPF Record', { width: 2200, bg: COLOURS.lightGrey, bold: true, fontSize: 18 }),
+        cell(spf ? spf.raw : 'Not found', { width: CONTENT_WIDTH - 2200, fontSize: 16 }),
+      ]}),
+      new TableRow({ children: [
+        cell('SPF Qualifier', { width: 2200, bg: COLOURS.lightGrey, bold: true, fontSize: 18 }),
+        cell(spf ? ({ '-': '-all (hardfail — correct)', '~': '~all (softfail)', '?': '?all (neutral — no protection)', '+': '+all (CRITICAL — allows all senders)' }[spf.qualifier] || spf.qualifier || 'Unknown') : 'N/A — SPF not found', {
+          width: CONTENT_WIDTH - 2200, fontSize: 18,
+          color: spf?.qualifier === '-' ? COLOURS.ok : spf?.qualifier === '~' ? COLOURS.warn : spf?.qualifier ? COLOURS.danger : COLOURS.danger,
+          bold: !!spf?.qualifier && spf.qualifier !== '-',
+        }),
+      ]}),
+      new TableRow({ children: [
+        cell('DMARC Record', { width: 2200, bg: COLOURS.lightGrey, bold: true, fontSize: 18 }),
+        cell(dmarc ? dmarc.raw : 'Not found', { width: CONTENT_WIDTH - 2200, fontSize: 16 }),
+      ]}),
+      new TableRow({ children: [
+        cell('DMARC Policy', { width: 2200, bg: COLOURS.lightGrey, bold: true, fontSize: 18 }),
+        cell(dmarc ? `p=${dmarc.policy}${dmarc.pct < 100 ? ` (${dmarc.pct}% enforcement)` : ''} · sp=${dmarc.subdomainPolicy || 'inherited'} · rua=${dmarc.rua || 'not set'}` : 'N/A — DMARC not found', {
+          width: CONTENT_WIDTH - 2200, fontSize: 18,
+          color: dmarc?.policy === 'reject' ? COLOURS.ok : dmarc?.policy ? COLOURS.warn : COLOURS.danger,
+        }),
+      ]}),
+      new TableRow({ children: [
+        cell('DKIM Selectors Found', { width: 2200, bg: COLOURS.lightGrey, bold: true, fontSize: 18 }),
+        cell((checks.emailSecurity?.dkimSelectors?.length > 0 ? checks.emailSecurity.dkimSelectors.join(', ') : 'None detected at common selectors'), {
+          width: CONTENT_WIDTH - 2200, fontSize: 18,
+        }),
+      ]}),
+    ],
+  }));
+
+  children.push(spacer(12));
+
+  // ── Zone transfer detail ──────────────────────────────────────────────────
+  const zoneXfer = checks.zoneTransfer;
+  if (zoneXfer?.nameservers?.length > 0) {
+    children.push(sectionHeading('Nameserver / Zone Transfer Detail', HeadingLevel.HEADING_2));
+    children.push(spacer(4));
+    children.push(new Table({
+      width: { size: CONTENT_WIDTH, type: WidthType.DXA },
+      columnWidths: [3500, 2430, 3430],
+      borders: ALL_BORDERS,
+      rows: [
+        new TableRow({ children: [
+          headerCell('Nameserver', 3500),
+          headerCell('IP Address', 2430),
+          headerCell('AXFR Result', 3430),
+        ]}),
+        ...(zoneXfer.axfrDetails || []).map((r, i) => new TableRow({ children: [
+          cell(r.nsHostname || r.nameserver, { width: 3500, bg: i % 2 === 0 ? COLOURS.white : COLOURS.lightGrey, fontSize: 18 }),
+          cell(r.nameserver || r.ip || '—', { width: 2430, bg: i % 2 === 0 ? COLOURS.white : COLOURS.lightGrey, fontSize: 18 }),
+          cell(r.vulnerable ? 'VULNERABLE — Zone transfer permitted' : (r.reason || 'Refused'), {
+            width: 3430,
+            bg: r.vulnerable ? 'FADBD8' : i % 2 === 0 ? COLOURS.white : COLOURS.lightGrey,
+            color: r.vulnerable ? COLOURS.danger : COLOURS.ok,
+            bold: r.vulnerable,
+            fontSize: 18,
+          }),
+        ]})),
+      ],
+    }));
+    children.push(spacer(12));
+  }
+
+  // ── DNS findings ──────────────────────────────────────────────────────────
+  children.push(sectionHeading('DNS Security Findings', HeadingLevel.HEADING_2));
+  children.push(spacer(4));
+
+  // Severity count bar
+  const sevCounts = {};
+  for (const f of findings) sevCounts[f.severity] = (sevCounts[f.severity] || 0) + 1;
+  children.push(new Table({
+    width: { size: CONTENT_WIDTH, type: WidthType.DXA },
+    columnWidths: [1872, 1872, 1872, 1872, 1872],
+    borders: ALL_BORDERS,
+    rows: [new TableRow({ children: ['CRITICAL','HIGH','MEDIUM','LOW','INFO'].map(s => {
+      const k = s.toLowerCase();
+      const style = SEV_STYLE[k];
+      return cell([
+        new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: String(sevCounts[k] || 0), bold: true, size: 40, color: style.text, font: 'Arial' })], spacing: { after: 0 } }),
+        new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: s, size: 14, color: style.text, font: 'Arial' })], spacing: { after: 0 } }),
+      ], { width: 1872, bg: style.bg });
+    })})],
+  }));
+  children.push(spacer(12));
+
+  // Individual DNS findings (same format as TLS findings)
+  for (const f of sorted) {
+    if (f.severity === 'info') continue; // skip info items to keep report concise
+    const style = SEV_STYLE[f.severity] || SEV_STYLE.info;
+    children.push(
+      new Table({
+        width: { size: CONTENT_WIDTH, type: WidthType.DXA },
+        columnWidths: [1400, CONTENT_WIDTH - 1400],
+        borders: NO_BORDERS,
+        rows: [new TableRow({ children: [
+          cell(style.label, { width: 1400, bg: style.text, color: COLOURS.white, bold: true, fontSize: 18, borders: NO_BORDERS }),
+          cell(f.title,     { width: CONTENT_WIDTH - 1400, bg: style.bg, color: style.text, bold: true, fontSize: 18, borders: NO_BORDERS }),
+        ]})],
+      }),
+      new Table({
+        width: { size: CONTENT_WIDTH, type: WidthType.DXA },
+        columnWidths: [1800, CONTENT_WIDTH - 1800],
+        borders: ALL_BORDERS,
+        rows: [
+          ...(f.hostname ? [new TableRow({ children: [
+            cell('Host',   { width: 1800, bg: COLOURS.lightGrey, bold: true, fontSize: 18 }),
+            cell(f.hostname, { width: CONTENT_WIDTH - 1800, fontSize: 18 }),
+          ]})] : []),
+          new TableRow({ children: [
+            cell('Area',   { width: 1800, bg: COLOURS.lightGrey, bold: true, fontSize: 18 }),
+            cell((f.area || '').replace(/-/g, ' ').toUpperCase(), { width: CONTENT_WIDTH - 1800, fontSize: 18 }),
+          ]}),
+          new TableRow({ children: [
+            cell('Detail', { width: 1800, bg: COLOURS.lightGrey, bold: true, fontSize: 18 }),
+            cell([new Paragraph({ children: [new TextRun({ text: f.detail, size: 18, font: 'Arial' })], spacing: { after: 0 } })], { width: CONTENT_WIDTH - 1800 }),
+          ]}),
+          ...(f.recommendation ? [new TableRow({ children: [
+            cell('Recommendation', { width: 1800, bg: COLOURS.lightGrey, bold: true, fontSize: 18 }),
+            cell([new Paragraph({ children: [new TextRun({ text: f.recommendation, size: 18, font: 'Arial', color: COLOURS.ok, bold: true })], spacing: { after: 0 } })], { width: CONTENT_WIDTH - 1800 }),
+          ]})] : []),
+          ...(f.nistRef ? [new TableRow({ children: [
+            cell('NIST Reference', { width: 1800, bg: COLOURS.lightGrey, bold: true, fontSize: 18 }),
+            cell(f.nistRef, { width: CONTENT_WIDTH - 1800, fontSize: 16 }),
+          ]})] : []),
+          ...(f.priority ? [new TableRow({ children: [
+            cell('Priority', { width: 1800, bg: COLOURS.lightGrey, bold: true, fontSize: 18 }),
+            cell(f.priority, { width: CONTENT_WIDTH - 1800, bold: true, color: f.priority === 'P1' ? COLOURS.danger : COLOURS.warn, fontSize: 18 }),
+          ]})] : []),
+        ],
+      }),
+      spacer(10),
+    );
+  }
+
+  return children;
+}
+
+// ─── Update buildPriorityRows to accept DNS data ──────────────────────────────
+
+function buildPriorityRows(summary, findings, dnsData) {
+  const ds = dnsData?.report?.summary || {};
   const areas = [
-    { area: 'TLS key exchange — PQ readiness', status: 'Live', impact: 'High', priority: 'P1 — Immediate', impactCol: COLOURS.danger },
-    { area: 'Certificate authority posture',   status: 'Live', impact: 'Medium', priority: 'P2 — Near-term', impactCol: COLOURS.warn },
-    { area: 'SNI / certificate matching',      status: summary.sniMismatches.length > 0 ? 'Finding' : 'Clear', impact: 'Medium', priority: summary.sniMismatches.length > 0 ? 'P1 — Immediate' : 'None', impactCol: COLOURS.warn },
-    { area: 'DNS surface / dormant subdomains', status: summary.hostsUnreachable > 0 ? 'Finding' : 'Clear', impact: 'Low–Medium', priority: summary.hostsUnreachable > 0 ? 'P2 — Near-term' : 'None', impactCol: COLOURS.ok },
-    { area: 'Externally exposed dev infrastructure', status: summary.devHostsExposed.length > 0 ? 'Finding' : 'Clear', impact: summary.devHostsExposed.length > 0 ? 'Medium' : 'None', priority: summary.devHostsExposed.length > 0 ? 'P1 — Immediate' : 'None', impactCol: COLOURS.warn },
+    { area: 'TLS key exchange — PQ readiness',        status: 'Live',    impact: 'High',      priority: 'P1 — Immediate',  impactCol: COLOURS.danger },
+    { area: 'Certificate authority posture',           status: 'Live',    impact: 'Medium',    priority: 'P2 — Near-term',  impactCol: COLOURS.warn },
+    { area: 'SNI / certificate matching',             status: summary.sniMismatches?.length > 0 ? 'Finding' : 'Clear', impact: 'Medium', priority: summary.sniMismatches?.length > 0 ? 'P1 — Immediate' : 'None', impactCol: COLOURS.warn },
+    { area: 'DNS zone transfer (AXFR)',               status: ds.axfrVulnerable ? 'VULNERABLE' : dnsData ? 'Clear' : 'Not tested', impact: ds.axfrVulnerable ? 'Critical' : 'None', priority: ds.axfrVulnerable ? 'P1 — Immediate' : 'None', impactCol: ds.axfrVulnerable ? COLOURS.danger : COLOURS.ok },
+    { area: 'Email authentication (SPF/DKIM/DMARC)',  status: (!ds.spfPresent || ds.dmarcPolicy === 'missing' || ds.dmarcPolicy === undefined) ? 'Finding' : ds.dmarcPolicy === 'reject' ? 'Clear' : 'Partial', impact: (!ds.spfPresent || !ds.dmarcPolicy) ? 'High' : 'Low', priority: (!ds.spfPresent || !ds.dmarcPolicy) ? 'P1 — Immediate' : 'P2 — Near-term', impactCol: (!ds.spfPresent) ? COLOURS.danger : COLOURS.warn },
+    { area: 'DNSSEC',                                 status: ds.dnssecDeployed ? 'Deployed' : dnsData ? 'Not deployed' : 'Not tested', impact: ds.dnssecDeployed ? 'None' : 'Medium', priority: ds.dnssecDeployed ? 'None' : 'P2 — Near-term', impactCol: ds.dnssecDeployed ? COLOURS.ok : COLOURS.warn },
+    { area: 'Subdomain takeover risk',                status: ds.takeoverCount > 0 ? `${ds.takeoverCount} vulnerable` : ds.danglingCNAMECount > 0 ? `${ds.danglingCNAMECount} dangling` : dnsData ? 'Clear' : 'Not tested', impact: ds.takeoverCount > 0 ? 'Critical' : ds.danglingCNAMECount > 0 ? 'High' : 'None', priority: ds.takeoverCount > 0 ? 'P1 — Immediate' : ds.danglingCNAMECount > 0 ? 'P1 — Immediate' : 'None', impactCol: ds.takeoverCount > 0 ? COLOURS.danger : COLOURS.ok },
+    { area: 'CAA records',                            status: ds.caaPresent ? 'Present' : dnsData ? 'Missing' : 'Not tested', impact: ds.caaPresent ? 'None' : 'Medium', priority: ds.caaPresent ? 'None' : 'P2 — Near-term', impactCol: ds.caaPresent ? COLOURS.ok : COLOURS.warn },
+    { area: 'Externally exposed dev infrastructure',  status: summary.devHostsExposed?.length > 0 ? 'Finding' : 'Clear', impact: summary.devHostsExposed?.length > 0 ? 'Medium' : 'None', priority: summary.devHostsExposed?.length > 0 ? 'P1 — Immediate' : 'None', impactCol: COLOURS.warn },
+    { area: 'DNS surface / dormant subdomains',       status: summary.hostsUnreachable > 0 ? 'Finding' : 'Clear', impact: 'Low–Medium', priority: summary.hostsUnreachable > 0 ? 'P2 — Near-term' : 'None', impactCol: COLOURS.ok },
   ];
 
   return areas.map((a, i) => new TableRow({
@@ -672,7 +937,7 @@ function buildControlMapping() {
 
 // ─── Main generator ───────────────────────────────────────────────────────────
 
-async function generateReport(scanResult) {
+async function generateReport(scanResult, dnsData = null) {
   const { summary, hosts, findings } = scanResult;
 
   const scanDate = new Date(summary.scanTime).toLocaleDateString('en-GB', {
@@ -728,8 +993,9 @@ async function generateReport(scanResult) {
       footers: { default: makeFooter() },
       children: [
         ...buildCoverPage(summary),
-        ...buildExecutiveSummary(summary, findings),
+        ...buildExecutiveSummary(summary, findings, dnsData),
         ...buildFindings(findings),
+        ...(dnsData ? buildDNSSection(dnsData) : []),
         ...buildHostInventory(hosts),
         ...buildRoadmap(summary),
         ...buildControlMapping(),
@@ -737,7 +1003,32 @@ async function generateReport(scanResult) {
     }],
   });
 
-  return Packer.toBuffer(doc);
+  const buffer = await Packer.toBuffer(doc);
+
+  // docx-js generates fontTable.xml but omits it from document.xml.rels.
+  // Inject the missing relationship so Word/LibreOffice don't report corruption.
+  try {
+    const AdmZip = (() => { try { return require('adm-zip'); } catch { return null; } })();
+    if (AdmZip) {
+      const zip = new AdmZip(buffer);
+      const relsPath = 'word/_rels/document.xml.rels';
+      const relsEntry = zip.getEntry(relsPath);
+      if (relsEntry) {
+        let relsXml = relsEntry.getData().toString('utf8');
+        if (relsXml.includes('fontTable.xml') === false && relsXml.includes('</Relationships>')) {
+          const nextId = (relsXml.match(/Id="rId(\d+)"/g) || []).length + 1;
+          relsXml = relsXml.replace(
+            '</Relationships>',
+            `  <Relationship Id="rId${nextId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable" Target="fontTable.xml"/>\n</Relationships>`
+          );
+          zip.updateFile(relsPath, Buffer.from(relsXml, 'utf8'));
+        }
+      }
+      return zip.toBuffer();
+    }
+  } catch {}
+
+  return buffer;
 }
 
 module.exports = { generateReport };

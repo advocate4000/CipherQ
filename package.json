@@ -1,16 +1,13 @@
 {
   "name": "cipherq-pqc-scanner",
-  "version": "1.1.0",
-  "description": "Post-Quantum Cryptographic domain scanner with DOCX report generation",
+  "version": "1.2.0",
+  "description": "Post-Quantum Cryptographic domain scanner with DNS security and DOCX report generation",
   "main": "scanner.js",
-  "bin": { "pqc-scan": "./cli.js" },
-  "scripts": {
-    "start": "node server.js",
-    "scan": "node cli.js"
-  },
+  "scripts": { "start": "node server.js" },
   "dependencies": {
     "express": "^4.19.2",
-    "docx": "^8.5.0"
+    "docx": "^8.5.0",
+    "adm-zip": "^0.5.10"
   },
   "engines": { "node": ">=18.0.0" }
 }
