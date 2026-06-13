@@ -14,7 +14,7 @@ const dns = require('dns').promises;
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const TLS_PORT = 443;
-const CONNECT_TIMEOUT_MS = 8000;
+const CONNECT_TIMEOUT_MS = 5000;  // reduced from 8000 — hung TCP connections are the main stall cause
 
 // Algorithms known to be quantum-safe (KEX)
 const PQ_KEX_PATTERNS = [
@@ -262,24 +262,24 @@ async function probeTLS(hostname, options = {}) {
 
 async function probeDNS(hostname) {
   const result = {
-    resolvesA: false,
-    resolvesAAAA: false,
-    aRecords: [],
-    aaaaRecords: [],
-    mxRecords: [],
-    nsRecords: [],
-    txtRecords: [],
-    cnameTarget: null,
-    error: null,
+    resolvesA: false, resolvesAAAA: false,
+    aRecords: [], aaaaRecords: [],
+    mxRecords: [], nsRecords: [], txtRecords: [],
+    cnameTarget: null, error: null,
   };
 
+  // Wrap each DNS query in a 4s timeout — some queries (MX, TXT on dead names)
+  // can stall for 30s+ without a hard limit
+  const withTimeout = (p, ms = 4000) =>
+    Promise.race([p, new Promise((_, r) => setTimeout(() => r(new Error('DNS timeout')), ms))]);
+
   const tasks = [
-    dns.resolve4(hostname).then(r => { result.resolvesA = true; result.aRecords = r; }).catch(() => {}),
-    dns.resolve6(hostname).then(r => { result.resolvesAAAA = true; result.aaaaRecords = r; }).catch(() => {}),
-    dns.resolveCname(hostname).then(r => { result.cnameTarget = r[0] || null; }).catch(() => {}),
-    dns.resolveMx(hostname).then(r => { result.mxRecords = r; }).catch(() => {}),
-    dns.resolveNs(hostname).then(r => { result.nsRecords = r; }).catch(() => {}),
-    dns.resolveTxt(hostname).then(r => { result.txtRecords = r.flat(); }).catch(() => {}),
+    withTimeout(dns.resolve4(hostname)).then(r => { result.resolvesA = true; result.aRecords = r; }).catch(() => {}),
+    withTimeout(dns.resolve6(hostname)).then(r => { result.resolvesAAAA = true; result.aaaaRecords = r; }).catch(() => {}),
+    withTimeout(dns.resolveCname(hostname)).then(r => { result.cnameTarget = r[0] || null; }).catch(() => {}),
+    withTimeout(dns.resolveMx(hostname)).then(r => { result.mxRecords = r; }).catch(() => {}),
+    withTimeout(dns.resolveNs(hostname)).then(r => { result.nsRecords = r; }).catch(() => {}),
+    withTimeout(dns.resolveTxt(hostname)).then(r => { result.txtRecords = r.flat(); }).catch(() => {}),
   ];
 
   await Promise.allSettled(tasks);
@@ -291,17 +291,19 @@ async function probeDNS(hostname) {
 
 async function probeLegacyTLS(hostname) {
   const versions = ['TLSv1.3', 'TLSv1.2', 'TLSv1.1', 'TLSv1'];
-  const results = {};
-
-  for (const ver of versions) {
-    const probe = await probeTLS(hostname, { tlsVersion: ver, timeoutMs: 5000 });
-    results[ver] = {
-      supported: probe.reachable && !probe.error,
-      cipher: probe.cipher?.name || null,
-      error: probe.error || null,
-    };
-  }
-  return results;
+  // Run all version probes in parallel rather than sequentially
+  const probes = await Promise.all(
+    versions.map(ver =>
+      probeTLS(hostname, { tlsVersion: ver, timeoutMs: 4000 })
+        .then(probe => [ver, {
+          supported: probe.reachable && !probe.error,
+          cipher: probe.cipher?.name || null,
+          error: probe.error || null,
+        }])
+        .catch(() => [ver, { supported: false, cipher: null, error: 'probe failed' }])
+    )
+  );
+  return Object.fromEntries(probes);
 }
 
 // ─── Weak Cipher Probe ────────────────────────────────────────────────────────
@@ -347,7 +349,7 @@ async function probeWeakCiphers(hostname) {
 async function probeHTTPS(hostname) {
   return new Promise((resolve) => {
     const http = require('http');
-    const options = { host: hostname, port: 80, path: '/', method: 'HEAD', timeout: 5000 };
+    const options = { host: hostname, port: 80, path: '/', method: 'HEAD', timeout: 3000 };
     const req = http.request(options, (res) => {
       resolve({
         httpReachable: true,
@@ -357,7 +359,7 @@ async function probeHTTPS(hostname) {
       });
     });
     req.on('error', () => resolve({ httpReachable: false }));
-    req.setTimeout(5000, () => { req.destroy(); resolve({ httpReachable: false }); });
+    req.setTimeout(3000, () => { req.destroy(); resolve({ httpReachable: false }); });
     req.end();
   });
 }
@@ -723,54 +725,263 @@ async function analyseHost(hostname, opts = {}) {
 
 // ─── Domain Scanner ───────────────────────────────────────────────────────────
 
-async function generateSubdomains(domain) {
-  // Common subdomains to probe (mirrors the report methodology)
-  const common = [
-    '', 'www', 'mail', 'email', 'webmail', 'webdisk', 'cpanel', 'whm',
-    'ftp', 'sftp', 'smtp', 'pop', 'imap', 'remote', 'vpn', 'gateway',
-    'portal', 'api', 'api2', 'dev', 'staging', 'stage', 'test', 'qa',
-    'uat', 'sandbox', 'demo', 'preview', 'beta', 'alpha',
-    'app', 'apps', 'hub', 'client', 'clients', 'account', 'accounts',
-    'secure', 'login', 'auth', 'sso', 'admin', 'dashboard',
-    'docs', 'help', 'support', 'status', 'monitor', 'grafana',
-    'kibana', 'prometheus', 'cdn', 'static', 'assets', 'media',
-    'upload', 'uploads', 'files', 'resources', 'downloads',
-    'blog', 'news', 'shop', 'store', 'billing', 'invoice', 'pay',
-    'payment', 'checkout', 'crm', 'erp', 'hr', 'intranet', 'wiki',
-    'jira', 'confluence', 'gitlab', 'git', 'jenkins', 'ci',
-    'www2', 'old', 'new', 'v2', 'mobile', 'm',
-    'mx', 'mx1', 'mx2', 'ns1', 'ns2', 'autodiscover', 'autoconfig',
-    'smtp', 'relay', 'bounce', 'tracking', 'click', 'open',
-  ];
+// ─── Expanded subdomain wordlist ─────────────────────────────────────────────
+// ~500 high-value names drawn from real-world enumeration datasets.
+// Ordered by probability of existence; CT log discovery supplements this.
+const SUBDOMAIN_WORDLIST = [
+  // Apex + www
+  '', 'www', 'www2', 'www3',
 
-  return common.map(sub => sub ? `${sub}.${domain}` : domain);
+  // Mail / messaging
+  'mail', 'mail1', 'mail2', 'email', 'webmail', 'smtp', 'smtp1', 'smtp2',
+  'pop', 'pop3', 'imap', 'mx', 'mx1', 'mx2', 'mx3', 'exchange',
+  'autodiscover', 'autoconfig', 'relay', 'bounce', 'lists', 'mailgun',
+  'sendgrid', 'ses', 'postfix', 'mailhog',
+
+  // Auth / identity
+  'auth', 'sso', 'login', 'signin', 'logout', 'oauth', 'id', 'identity',
+  'adfs', 'okta', 'ping', 'saml', 'sts', 'idp', 'token', 'accounts',
+  'account', 'register', 'signup', 'password', 'reset', 'mfa', 'otp',
+
+  // APIs
+  'api', 'api2', 'api3', 'apis', 'api-v1', 'api-v2', 'api-v3',
+  'rest', 'graphql', 'grpc', 'rpc', 'gateway', 'apigw', 'api-gateway',
+  'integration', 'integrations', 'webhook', 'webhooks', 'socket', 'ws',
+  'public-api', 'private-api', 'internal-api', 'external-api',
+
+  // CDN / static
+  'cdn', 'cdn1', 'cdn2', 'static', 'static1', 'static2', 'assets',
+  'media', 'img', 'images', 'image', 'video', 'videos', 'audio',
+  'files', 'file', 'uploads', 'upload', 'downloads', 'download',
+  'resources', 'content', 'data', 'cache', 's3', 'storage', 'blob',
+
+  // Apps / portals
+  'app', 'apps', 'app1', 'app2', 'application', 'applications',
+  'portal', 'hub', 'dashboard', 'console', 'control', 'panel',
+  'admin', 'admin1', 'administrator', 'manage', 'management',
+  'client', 'clients', 'customer', 'customers', 'partner', 'partners',
+  'member', 'members', 'user', 'users', 'profile', 'profiles',
+  'secure', 'protected', 'private', 'restricted',
+
+  // Development / test environments
+  'dev', 'dev1', 'dev2', 'development', 'develop',
+  'staging', 'stage', 'stg', 'stg1', 'stg2',
+  'test', 'test1', 'test2', 'testing', 'tst',
+  'qa', 'qa1', 'qa2', 'quality',
+  'uat', 'uat1', 'uat2', 'acceptance',
+  'sandbox', 'sbx', 'preview', 'pre', 'preprod', 'pre-prod',
+  'demo', 'demo1', 'demo2', 'beta', 'alpha', 'canary',
+  'local', 'localhost', 'internal', 'int', 'int1',
+  'rc', 'release', 'hotfix', 'feature', 'experimental',
+
+  // Infrastructure / DevOps
+  'vpn', 'vpn1', 'vpn2', 'remote', 'rdp', 'citrix', 'juniper',
+  'pulse', 'globalprotect', 'anyconnect', 'openvpn', 'wireguard',
+  'ssh', 'jump', 'bastion', 'proxy', 'proxy1', 'proxy2',
+  'firewall', 'fw', 'lb', 'loadbalancer', 'haproxy', 'nginx',
+  'ns', 'ns1', 'ns2', 'ns3', 'ns4', 'dns', 'dns1', 'dns2',
+  'ntp', 'time', 'radius', 'ldap', 'ad', 'dc', 'dc1', 'dc2',
+
+  // Monitoring / observability
+  'monitor', 'monitoring', 'grafana', 'kibana', 'prometheus',
+  'alertmanager', 'alert', 'alerts', 'opsgenie', 'pagerduty',
+  'nagios', 'zabbix', 'datadog', 'newrelic', 'splunk',
+  'elk', 'elastic', 'elasticsearch', 'logstash', 'fluentd',
+  'metrics', 'logs', 'log', 'apm', 'trace', 'tracing', 'healthcheck',
+  'health', 'status', 'uptime', 'ping',
+
+  // CI/CD / source control
+  'git', 'gitlab', 'github', 'bitbucket', 'svn', 'repo', 'repos',
+  'registry', 'docker', 'harbor', 'nexus', 'artifactory',
+  'jenkins', 'ci', 'cd', 'cicd', 'build', 'builds', 'pipeline',
+  'drone', 'travis', 'circle', 'argocd', 'flux', 'helm',
+
+  // Cloud / kubernetes
+  'k8s', 'kubernetes', 'rancher', 'openshift', 'nomad',
+  'vault', 'consul', 'terraform', 'ansible',
+  'aws', 'azure', 'gcp', 'cloud', 'cluster', 'node',
+
+  // Collaboration / productivity
+  'jira', 'confluence', 'wiki', 'wiki1', 'docs', 'doc', 'documentation',
+  'sharepoint', 'teams', 'slack', 'meet', 'video', 'conference',
+  'calendar', 'cal', 'hr', 'hris', 'erp', 'crm', 'salesforce',
+  'workday', 'sap', 'oracle', 'netsuite', 'servicenow',
+
+  // Finance / payments
+  'billing', 'bill', 'invoice', 'invoices', 'pay', 'payment', 'payments',
+  'checkout', 'cart', 'shop', 'store', 'ecommerce', 'commerce',
+  'stripe', 'paypal', 'finance', 'accounting', 'accounts-payable',
+  'treasury', 'bank', 'transaction',
+
+  // Hosting defaults (cPanel / Plesk)
+  'webdisk', 'cpanel', 'whm', 'plesk', 'ftp', 'sftp',
+  'webmail', 'autodiscover', 'autoconfig',
+
+  // Marketing / web
+  'blog', 'news', 'press', 'media-room', 'newsroom',
+  'marketing', 'promo', 'campaign', 'campaigns', 'landing',
+  'careers', 'jobs', 'recruit', 'recruitment',
+  'help', 'support', 'helpdesk', 'servicedesk', 'ticket', 'tickets',
+  'feedback', 'survey', 'forms', 'form',
+  'tracking', 'track', 'click', 'open', 'pixel',
+
+  // Mobile / versioned
+  'm', 'mobile', 'wap', 'pwa', 'native',
+  'v1', 'v2', 'v3', 'v4', 'new', 'old', 'legacy', 'classic',
+  'next', 'preview2', 'future',
+
+  // Security-specific
+  'siem', 'soc', 'threat', 'pentest', 'scan', 'vulnerability',
+  'cert', 'certs', 'pki', 'ca', 'crl', 'ocsp', 'acme',
+
+  // Misc common
+  'intranet', 'extranet', 'corpnet', 'corp',
+  'connect', 'relay', 'edge', 'origin', 'backend', 'frontend',
+  'web', 'web1', 'web2', 'server', 'server1', 'server2',
+  'host', 'host1', 'host2', 'node1', 'node2',
+  'db', 'database', 'mysql', 'postgres', 'mongo', 'redis', 'memcache',
+  'backup', 'backups', 'archive', 'archives', 'dr', 'disaster',
+  'prod', 'production', 'live', 'preprod',
+];
+
+async function generateSubdomains(domain) {
+  return SUBDOMAIN_WORDLIST.map(sub => sub ? `${sub}.${domain}` : domain);
+}
+
+// ─── Certificate Transparency log discovery ───────────────────────────────────
+// Queries crt.sh to find all subdomains that have ever had a certificate issued.
+// This reveals the real external footprint independent of DNS guessing.
+async function discoverViaCT(domain) {
+  return new Promise((resolve) => {
+    const https = require('https');
+    const options = {
+      hostname: 'crt.sh',
+      path: `/?q=%.${encodeURIComponent(domain)}&output=json`,
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': 'CipherQ-PQC-Scanner/1.0',
+      },
+      timeout: 15000,
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          if (res.statusCode !== 200) {
+            return resolve({ hosts: [], source: 'ct-log', error: `HTTP ${res.statusCode}` });
+          }
+          const entries = JSON.parse(data);
+          const names = new Set();
+
+          for (const entry of entries) {
+            // name_value may contain multiple names newline-separated
+            const rawNames = (entry.name_value || '').split('\n');
+            for (const name of rawNames) {
+              const n = name.trim().toLowerCase().replace(/^\*\./, '');
+              // Only include direct subdomains of the target domain
+              if (n.endsWith(`.${domain}`) || n === domain) {
+                // Exclude wildcard entries themselves
+                if (!n.startsWith('*')) names.add(n);
+              }
+            }
+          }
+
+          resolve({
+            hosts: [...names].sort(),
+            source: 'ct-log',
+            totalCerts: entries.length,
+            error: null,
+          });
+        } catch (e) {
+          resolve({ hosts: [], source: 'ct-log', error: e.message });
+        }
+      });
+    });
+
+    req.on('error', (e) => {
+      resolve({ hosts: [], source: 'ct-log', error: e.message });
+    });
+
+    req.setTimeout(15000, () => {
+      req.destroy();
+      resolve({ hosts: [], source: 'ct-log', error: 'CT log query timed out' });
+    });
+
+    req.end();
+  });
 }
 
 async function scanDomain(domain, opts = {}) {
   const {
     customHosts = [],
-    concurrency = 5,
+    ctHostsFromBrowser = [],
+    concurrency = 8,
     deepLegacyProbe = true,
     weakCipherProbe = true,
     onProgress = null,
+    useCTLog = false,  // server-side CT disabled; browser handles it
   } = opts;
 
-  // Build host list
   let hosts;
-  if (customHosts.length > 0) {
-    hosts = customHosts;
+  let ctResult = null;
+
+  if (customHosts.length > 0 && ctHostsFromBrowser.length === 0) {
+    // Explicit custom list with no CT supplement — use as-is
+    hosts = [...new Set(customHosts)];
   } else {
-    hosts = await generateSubdomains(domain);
+    // Always start with the full wordlist
+    const wordlistHosts = await generateSubdomains(domain);
+
+    if (ctHostsFromBrowser.length > 0) {
+      // Merge browser-discovered CT hosts with wordlist
+      const merged = new Set([...wordlistHosts, ...ctHostsFromBrowser]);
+      hosts = [...merged];
+      ctResult = {
+        hosts: ctHostsFromBrowser,
+        source: 'browser',
+        error: null,
+      };
+    } else if (useCTLog) {
+      // Server-side CT (only used when running locally or egress is open)
+      if (onProgress) onProgress({ phase: 'ct-discovery', completed: 0, total: 0, message: 'Querying Certificate Transparency logs…' });
+      ctResult = await discoverViaCT(domain);
+      const merged = new Set([...wordlistHosts, ...(ctResult.hosts || [])]);
+      hosts = [...merged];
+    } else {
+      hosts = wordlistHosts;
+    }
   }
 
   const results = [];
   let completed = 0;
 
-  // Process in batches to respect concurrency
+  // Hard per-host timeout — if any single host hangs (e.g. DNS stall, TCP black-hole),
+  // it gets a stub result after 12s rather than blocking the entire batch forever
+  const analyseWithTimeout = (host, opts) =>
+    Promise.race([
+      analyseHost(host, opts),
+      new Promise(resolve => setTimeout(() => resolve({
+        hostname: host,
+        timestamp: new Date().toISOString(),
+        dns: { resolves: false, aRecords: [] },
+        tls: null,
+        findings: [],
+        riskScore: 0,
+        pqReadiness: 'not-applicable',
+        hndlRisk: 'not-applicable',
+        tnflRisk: 'not-applicable',
+        _timedOut: true,
+      }), 12000)),
+    ]);
+
+  // Process in batches
   for (let i = 0; i < hosts.length; i += concurrency) {
     const batch = hosts.slice(i, i + concurrency);
     const batchResults = await Promise.all(
-      batch.map(host => analyseHost(host, { deepLegacyProbe, weakCipherProbe }))
+      batch.map(host => analyseWithTimeout(host, { deepLegacyProbe, weakCipherProbe }))
     );
     results.push(...batchResults);
     completed += batch.length;
@@ -794,6 +1005,12 @@ async function scanDomain(domain, opts = {}) {
     hostsUnreachable: unreachable.length,
     hostsNxdomain: nxdomain.length,
     findingsTotal: allFindings.length,
+    ctLog: ctResult ? {
+      enabled: true,
+      hostsDiscovered: ctResult.hosts.length,
+      totalCerts: ctResult.totalCerts || 0,
+      error: ctResult.error,
+    } : { enabled: false },
     findingsBySeverity: {
       critical: allFindings.filter(f => f.severity === 'critical').length,
       high: allFindings.filter(f => f.severity === 'high').length,
@@ -826,5 +1043,6 @@ module.exports = {
   probeTLS,
   probeDNS,
   generateSubdomains,
+  discoverViaCT,
   categoriseSubdomain,
 };
