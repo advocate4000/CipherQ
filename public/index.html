@@ -1972,50 +1972,79 @@ function renderSecurityTab(containerId, data, title, stats, extraData) {
 async function downloadReport() {
   if (!scanData) return;
 
-  const btn = document.getElementById('report-btn');
+  const btn    = document.getElementById('report-btn');
   const status = document.getElementById('report-status');
   btn.disabled = true;
   btn.textContent = '⏳ Generating report…';
 
+  // ── Helper: fetch with AbortController timeout ───────────────────
+  const fetchWithTimeout = (url, opts, timeoutMs) => {
+    const ctrl = new AbortController();
+    const tid  = setTimeout(() => ctrl.abort(), timeoutMs);
+    return fetch(url, { ...opts, signal: ctrl.signal })
+      .finally(() => clearTimeout(tid));
+  };
+
+  // ── Helper: run a sub-scan only if we don't already have results ─
   const runIfMissing = async (data, endpoint, body, label) => {
     if (data) return data;
     status.textContent = `Running ${label} scan…`;
     status.style.color = 'var(--accent)';
     try {
-      const r = await fetch(endpoint, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      const r = await fetchWithTimeout(
+        endpoint,
+        { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) },
+        55000  // 55s — just under Render's 60s hard limit
+      );
       if (r.ok) return await r.json();
       const errText = await r.text().catch(() => '');
-      console.warn(`[CipherQ] ${label} scan returned HTTP ${r.status}:`, errText.slice(0,200));
+      console.warn(`[CipherQ] ${label} HTTP ${r.status}:`, errText.slice(0,300));
     } catch(e) {
-      console.warn(`[CipherQ] ${label} scan failed:`, e.message);
+      console.warn(`[CipherQ] ${label} failed:`, e.name === 'AbortError' ? 'timed out after 55s' : e.message);
     }
     return null;
   };
 
-  const hostPayload = scanData.hosts.filter(h => h.dns?.resolves);
-  const tlsHosts   = scanData.hosts.filter(h => h.tls?.cipher);
-
-  dnsSecData     = await runIfMissing(dnsSecData,     '/api/dns-scan',     { domain: scanData.summary.domain, hosts: hostPayload }, 'DNS security');
-  httpSecData    = await runIfMissing(httpSecData,    '/api/http-scan',    { domain: scanData.summary.domain, hosts: tlsHosts }, 'HTTP security');
-  networkSecData = await runIfMissing(networkSecData, '/api/network-scan', { domain: scanData.summary.domain, hosts: hostPayload }, 'network');
-
-  status.textContent = 'Building full assessment report…';
-  status.style.color = 'var(--text2)';
-
   try {
-    const response = await fetch('/api/report', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        scanResult:  scanData,
-        dnsData:     dnsSecData     || null,
-        httpData:    httpSecData    || null,
-        networkData: networkSecData || null,
-      }),
-    });
+    const hostPayload = scanData.hosts.filter(h => h.dns?.resolves);
+    const tlsHosts    = scanData.hosts.filter(h => h.tls?.cipher);
+
+    // Run any missing sub-scans sequentially (parallel risks memory spike on server)
+    dnsSecData     = await runIfMissing(dnsSecData,     '/api/dns-scan',     { domain: scanData.summary.domain, hosts: hostPayload }, 'DNS security');
+    httpSecData    = await runIfMissing(httpSecData,    '/api/http-scan',    { domain: scanData.summary.domain, hosts: tlsHosts    }, 'HTTP security');
+    networkSecData = await runIfMissing(networkSecData, '/api/network-scan', { domain: scanData.summary.domain, hosts: hostPayload }, 'network');
+
+    status.textContent = 'Building report — this can take 20–30 seconds…';
+    status.style.color = 'var(--text2)';
+
+    // ── Pulse the status text so the user knows it's still working ─
+    let dots = 0;
+    const pulse = setInterval(() => {
+      dots = (dots + 1) % 4;
+      status.textContent = 'Building report' + '.'.repeat(dots);
+    }, 600);
+
+    let response;
+    try {
+      response = await fetchWithTimeout(
+        '/api/report',
+        {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            scanResult:  scanData,
+            dnsData:     dnsSecData     || null,
+            httpData:    httpSecData    || null,
+            networkData: networkSecData || null,
+          }),
+        },
+        90000   // 90s client timeout — report generation can be slow
+      );
+    } finally {
+      clearInterval(pulse);
+    }
 
     if (!response.ok) {
-      // Try JSON first, then plain text, then fall back to HTTP status
       let errMsg = `HTTP ${response.status}`;
       try {
         const body = await response.text();
@@ -2023,20 +2052,25 @@ async function downloadReport() {
           const json = JSON.parse(body);
           errMsg = json.error || json.message || json.details || JSON.stringify(json);
         } catch {
-          // Not JSON — use raw text (trim to 300 chars so it fits on screen)
-          errMsg = body.trim().slice(0, 300) || errMsg;
+          errMsg = body.trim().slice(0, 400) || errMsg;
         }
       } catch {}
+      // 502 usually means the server process crashed or Render killed it
+      if (response.status === 502) {
+        errMsg = `Server error (502) — the report server crashed or timed out. ` +
+                 `Try running DNS/HTTP/Network scans first via the tabs, then retry. ` +
+                 `Detail: ${errMsg}`;
+      }
       throw new Error(errMsg);
     }
 
     const disposition = response.headers.get('Content-Disposition') || '';
-    const match = disposition.match(/filename="([^"]+)"/);
-    const filename = match ? match[1] : `CipherQ_QTA_${scanData.summary.domain}.docx`;
+    const match       = disposition.match(/filename="([^"]+)"/);
+    const filename    = match ? match[1] : `CipherQ_QTA_${scanData.summary.domain}.docx`;
 
     const blob = await response.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
     a.href = url; a.download = filename;
     document.body.appendChild(a); a.click();
     document.body.removeChild(a);
@@ -2044,8 +2078,10 @@ async function downloadReport() {
 
     status.textContent = `✓ Downloaded: ${filename}`;
     status.style.color = 'var(--ok)';
+
   } catch (e) {
-    status.textContent = `Error: ${e.message}`;
+    const msg = e.name === 'AbortError' ? 'Timed out after 90s — server took too long to build the report' : e.message;
+    status.textContent = `⚠ ${msg}`;
     status.style.color = 'var(--danger)';
     console.error('[CipherQ] Report download failed:', e);
   } finally {
