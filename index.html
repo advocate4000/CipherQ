@@ -2222,41 +2222,37 @@ async function downloadReport() {
   const HOT     = '#ff8c2a';
   const CHAR_SP = 3;
 
-  // Measure and size canvas
+  // Size canvas
   ctx.font = FONT;
   const textW = ctx.measureText(TEXT).width + (TEXT.length - 1) * CHAR_SP;
   const H = 32;
   canvas.width  = Math.ceil(textW) + 4;
   canvas.height = H;
 
-  let frame = 0;
+  const W = canvas.width;
 
-  // Sweep: horizontal (left-to-right), very slow
-  let sweepX = 0;
-  const sweepSpeed = 0.00133; // px per frame — ~15min per pass
+  // ── Time-based state (all in real milliseconds) ──────────────────
+  // Sweep: one full pass every 72 hours = 259200000 ms
+  const SWEEP_PERIOD_MS   = 259200000;
 
-  // Flicker
-  let flicker = 1.0, flickerTarget = 1.0, flickerCooldown = 0;
+  // Glitch: fires once every 6–12 hours, chosen randomly each time
+  const GLITCH_MIN_MS     = 21600000;   //  6 hours
+  const GLITCH_GAP_MS     = 21600000;   // +0–6 hours random
 
-  // Glitch state: random horizontal band tears
-  let glitchBands = [];   // [{y, h, shift, life, maxLife}]
-  let glitchSpawnTimer = 24300 + Math.floor(Math.random() * 24300);
+  const startTime = Date.now();
+  let nextGlitchAt = startTime + GLITCH_MIN_MS + Math.random() * GLITCH_GAP_MS;
 
-  function spawnGlitch() {
-    const numBands = 1 + Math.floor(Math.random() * 3);
-    for (let i = 0; i < numBands; i++) {
-      const bandH = 2 + Math.floor(Math.random() * 6);
-      glitchBands.push({
-        y:       Math.floor(Math.random() * H),
-        h:       bandH,
-        shift:   (Math.random() < 0.5 ? -1 : 1) * (2 + Math.random() * 8),
-        life:    0,
-        maxLife: 1 + Math.floor(Math.random() * 3),
-      });
-    }
-    // Next glitch: very slow — 12 to 30 seconds at 60fps
-    glitchSpawnTimer = 32400 + Math.floor(Math.random() * 32400);
-  }
+  // Active glitch bands [{y, h, shift, endTime}]
+  let glitchBands = [];
+  const GLITCH_HOLD_MS = 200; // how long each tear is visible (ms)
+
+  // Flicker — stays frame-rate based, lightweight
+  let flicker = 1.0, flickerTarget = 1.0, frameN = 0;
+  // Flicker — time-based, fires every ~45 seconds
+  const FLICKER_MIN_MS = 40000;
+  const FLICKER_GAP_MS = 10000;
+  let nextFlickerAt = startTime + FLICKER_MIN_MS + Math.random() * FLICKER_GAP_MS;
+  let flickerEndAt  = 0;
 
   function drawLetterspaced(text, x, y) {
     let cx = x;
@@ -2267,78 +2263,82 @@ async function downloadReport() {
   }
 
   function drawFrame() {
-    frame++;
-    const W = canvas.width;
+    frameN++;
+    const now = Date.now();
+    const elapsed = now - startTime;
 
-    // ── Flicker ──────────────────────────────────────────────────────
-    if (flickerCooldown > 0) {
-      flickerCooldown--;
+    // ── Flicker — time-based, ~every 45 seconds ─────────────────
+    if (now >= nextFlickerAt && now < flickerEndAt) {
+      // Mid-flicker: dim
+      flickerTarget = 0.08 + Math.random() * 0.25;
+    } else if (now >= flickerEndAt && flickerEndAt > 0) {
+      // Flicker done: snap back bright
+      flickerTarget = 0.9 + Math.random() * 0.1;
+      flickerEndAt  = 0;
+      nextFlickerAt = now + FLICKER_MIN_MS + Math.random() * FLICKER_GAP_MS;
+    } else if (now >= nextFlickerAt && flickerEndAt === 0) {
+      // Start a flicker: lasts 80–300ms
+      flickerTarget = 0.08 + Math.random() * 0.25;
+      flickerEndAt  = now + 80 + Math.random() * 220;
     } else {
-      if (Math.random() < 0.012) {
-        flickerTarget = 0.1 + Math.random() * 0.25;
-        flickerCooldown = 1 + Math.floor(Math.random() * 3);
-      } else {
-        flickerTarget = 0.82 + Math.random() * 0.18;
-      }
+      // Idle: gentle breathing variance
+      if (Math.random() < 0.004) flickerTarget = 0.88 + Math.random() * 0.12;
     }
-    flicker += (flickerTarget - flicker) * 0.35;
+    flicker += (flickerTarget - flicker) * 0.25;
 
-    // ── Glitch spawn ─────────────────────────────────────────────────
-    glitchSpawnTimer--;
-    if (glitchSpawnTimer <= 0) spawnGlitch();
+    // ── Sweep position — purely time-based ───────────────────────
+    // sweepX goes 0→W over SWEEP_PERIOD_MS, then wraps
+    const sweepX = ((elapsed % SWEEP_PERIOD_MS) / SWEEP_PERIOD_MS) * W;
 
-    // Age out dead glitch bands
-    glitchBands = glitchBands.filter(b => b.life < b.maxLife);
-    glitchBands.forEach(b => b.life++);
+    // ── Glitch — time-based spawn ─────────────────────────────────
+    if (now >= nextGlitchAt) {
+      // Spawn 2–6 dramatic bands
+      const numBands = 2 + Math.floor(Math.random() * 5);
+      for (let i = 0; i < numBands; i++) {
+        glitchBands.push({
+          y:       Math.floor(Math.random() * H),
+          h:       2 + Math.floor(Math.random() * 7),
+          shift:   (Math.random() < 0.5 ? -1 : 1) * (6 + Math.random() * 22),
+          endTime: now + GLITCH_HOLD_MS + Math.random() * 200,
+        });
+      }
+      // Schedule next glitch
+      nextGlitchAt = now + GLITCH_MIN_MS + Math.random() * GLITCH_GAP_MS;
+    }
+    // Expire dead bands
+    glitchBands = glitchBands.filter(b => now < b.endTime);
 
+    // ── Draw ─────────────────────────────────────────────────────
     ctx.clearRect(0, 0, W, H);
     ctx.font = FONT;
     ctx.textBaseline = 'middle';
     const y = H / 2 + 1;
 
-    // ── Text glow passes ──────────────────────────────────────────────
-    ctx.save();
-    ctx.filter = 'blur(6px)';
-    ctx.globalAlpha = 0.4 * flicker;
-    ctx.fillStyle = ORANGE;
-    drawLetterspaced(TEXT, 2, y);
-    ctx.restore();
+    // Glow layers
+    ctx.save(); ctx.filter = 'blur(6px)'; ctx.globalAlpha = 0.4 * flicker;
+    ctx.fillStyle = ORANGE; drawLetterspaced(TEXT, 2, y); ctx.restore();
 
-    ctx.save();
-    ctx.filter = 'blur(2px)';
-    ctx.globalAlpha = 0.65 * flicker;
-    ctx.fillStyle = ORANGE;
-    drawLetterspaced(TEXT, 2, y);
-    ctx.restore();
+    ctx.save(); ctx.filter = 'blur(2px)'; ctx.globalAlpha = 0.65 * flicker;
+    ctx.fillStyle = ORANGE; drawLetterspaced(TEXT, 2, y); ctx.restore();
 
-    ctx.save();
-    ctx.filter = 'none';
-    ctx.globalAlpha = flicker;
-    ctx.fillStyle = ORANGE;
-    drawLetterspaced(TEXT, 2, y);
-    ctx.restore();
+    ctx.save(); ctx.filter = 'none'; ctx.globalAlpha = flicker;
+    ctx.fillStyle = ORANGE; drawLetterspaced(TEXT, 2, y); ctx.restore();
 
-    ctx.save();
-    ctx.filter = 'blur(1px)';
-    ctx.globalAlpha = 0.18 * flicker;
-    ctx.fillStyle = HOT;
-    drawLetterspaced(TEXT, 2, y);
-    ctx.restore();
+    ctx.save(); ctx.filter = 'blur(1px)'; ctx.globalAlpha = 0.18 * flicker;
+    ctx.fillStyle = HOT; drawLetterspaced(TEXT, 2, y); ctx.restore();
 
-    // ── Glitch bands (shift horizontal slices) ─────────────────────
+    // Glitch bands
     for (const b of glitchBands) {
-      if (b.y + b.h > H || b.y < 0) continue;
-      // Copy the band and redraw offset
+      if (b.y < 0 || b.y + b.h > H) continue;
       try {
         const strip = ctx.getImageData(0, b.y, W, b.h);
         ctx.putImageData(strip, b.shift, b.y);
-        // Optionally smear the original with dim fill to leave a ghost
-        ctx.fillStyle = `rgba(200,90,0,0.08)`;
+        ctx.fillStyle = 'rgba(200,90,0,0.08)';
         ctx.fillRect(0, b.y, W, b.h);
       } catch(e) {}
     }
 
-    // ── Static scanlines (horizontal stripes) ─────────────────────
+    // Static scanlines
     ctx.save();
     for (let sy = 0; sy < H; sy += 2) {
       ctx.fillStyle = 'rgba(0,0,0,0.30)';
@@ -2346,21 +2346,20 @@ async function downloadReport() {
     }
     ctx.restore();
 
-    // ── Moving sweep — LEFT TO RIGHT, very slow ───────────────────
-    sweepX = (sweepX + sweepSpeed) % W;
+    // Moving sweep beam (time-based position)
     ctx.save();
-    const sweepGrad = ctx.createLinearGradient(sweepX - 10, 0, sweepX + 10, 0);
-    sweepGrad.addColorStop(0,    'rgba(255,160,60,0)');
-    sweepGrad.addColorStop(0.4,  'rgba(255,160,60,0.14)');
-    sweepGrad.addColorStop(0.5,  'rgba(255,160,60,0.28)');
-    sweepGrad.addColorStop(0.6,  'rgba(255,160,60,0.14)');
-    sweepGrad.addColorStop(1,    'rgba(255,160,60,0)');
-    ctx.fillStyle = sweepGrad;
+    const sg = ctx.createLinearGradient(sweepX - 10, 0, sweepX + 10, 0);
+    sg.addColorStop(0,   'rgba(255,160,60,0)');
+    sg.addColorStop(0.4, 'rgba(255,160,60,0.14)');
+    sg.addColorStop(0.5, 'rgba(255,160,60,0.28)');
+    sg.addColorStop(0.6, 'rgba(255,160,60,0.14)');
+    sg.addColorStop(1,   'rgba(255,160,60,0)');
+    ctx.fillStyle = sg;
     ctx.fillRect(sweepX - 10, 0, 20, H);
     ctx.restore();
 
-    // ── Grain ────────────────────────────────────────────────────
-    if (frame % 2 === 0) {
+    // Grain
+    if (frameN % 2 === 0) {
       const imgData = ctx.getImageData(0, 0, W, H);
       const d = imgData.data;
       for (let i = 0; i < d.length; i += 12) {
@@ -2376,7 +2375,6 @@ async function downloadReport() {
   }
 
   requestAnimationFrame(drawFrame);
-})();
-</script>
+})()</script>
 </body>
 </html>
