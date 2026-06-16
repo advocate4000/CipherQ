@@ -1250,24 +1250,56 @@ async function runServerScan(domain, customHosts, fill, label) {
   });
   const { jobId } = await resp.json();
 
-  // Step 3: Poll for results
-  while (true) {
-    await new Promise(r => setTimeout(r, 1500));
-    const poll = await fetch(`/api/scan/${jobId}`).then(r => r.json());
-    if (poll.progress?.completed != null) {
-      const pct = 15 + Math.round((poll.progress.completed / (poll.progress.total || 1)) * 83);
-      fill.style.width = `${pct}%`;
-      label.textContent = `Probing ${poll.progress.completed} / ${poll.progress.total} hosts…`;
-      addLog('info', `Progress: ${poll.progress.completed}/${poll.progress.total}`);
-    }
-    if (poll.status === 'complete') {
-      // Inject the browser-side CT metadata into the result summary
-      if (poll.result?.summary) poll.result.summary.ctLog = ctMeta;
-      renderResults(poll.result);
-      break;
-    }
-    if (poll.status === 'error') throw new Error(poll.error);
-  }
+  // Step 3: Stream progress via Server-Sent Events — one persistent connection
+  // that keeps itself alive with heartbeats, avoiding Render's 30s idle timeout
+  await new Promise((resolve, reject) => {
+    const evtSource = new EventSource(`/api/scan/${jobId}/stream`);
+    const start = Date.now();
+    let lastActivity = Date.now();
+
+    // Watchdog: if no event for 60s, something has gone badly wrong
+    const watchdog = setInterval(() => {
+      if (Date.now() - lastActivity > 60000) {
+        clearInterval(watchdog);
+        evtSource.close();
+        reject(new Error('No progress received for 60 seconds — scan may have stalled'));
+      }
+    }, 5000);
+
+    evtSource.onmessage = (e) => {
+      lastActivity = Date.now();
+      let msg;
+      try { msg = JSON.parse(e.data); } catch { return; }
+
+      if (msg.status === 'running' && msg.progress?.completed != null && msg.progress.total > 0) {
+        const pct = 15 + Math.round((msg.progress.completed / msg.progress.total) * 83);
+        fill.style.width = `${Math.min(pct, 98)}%`;
+        label.textContent = `Probing ${msg.progress.completed} / ${msg.progress.total} hosts…`;
+        addLog('info', `Progress: ${msg.progress.completed}/${msg.progress.total}`);
+      }
+
+      if (msg.status === 'complete') {
+        clearInterval(watchdog);
+        evtSource.close();
+        fill.style.width = '100%';
+        if (msg.result?.summary) msg.result.summary.ctLog = ctMeta;
+        renderResults(msg.result);
+        resolve();
+      }
+
+      if (msg.status === 'error') {
+        clearInterval(watchdog);
+        evtSource.close();
+        reject(new Error(msg.error || 'Scan failed on server'));
+      }
+    };
+
+    evtSource.onerror = (e) => {
+      // SSE auto-reconnects on error — only fail if we get repeated errors
+      addLog('warn', 'SSE connection interrupted, reconnecting…');
+      lastActivity = Date.now(); // reset watchdog on reconnect
+    };
+  });
 }
 
 // ─── Render Results ──────────────────────────────────────────────────────────
