@@ -19,11 +19,11 @@
     --amber-glow: #ffc23a;
 
     /* All UI accents are grey */
-    --accent:     #aaaaaa;
+    --accent:     #cccccc;
     --accent2:    #666666;
     --accent-dim: #444444;
     --accent-pale:#1a1a1a;
-    --accent-glow:#dddddd;
+    --accent-glow:#f0f0f0;
 
     --danger:     #ff3322;
     --danger-dim: #3d0e08;
@@ -34,9 +34,9 @@
     --info:       #00e5ff;
     --info-dim:   #043838;
 
-    --muted:      #606060;
-    --text:       #c8c8c8;
-    --text2:      #888888;
+    --muted:      #808080;
+    --text:       #e0e0e0;
+    --text2:      #aaaaaa;
     --font-mono:  'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
     --font-ui:    'JetBrains Mono', 'Courier New', monospace;
   }
@@ -183,24 +183,18 @@
   .scan-panel::before { top: -1px; left: -1px; border-width: 2px 0 0 2px; }
   .scan-panel::after  { top: -1px; right: -1px; border-width: 2px 2px 0 0; }
 
-  .scan-panel h2 {
-    font-size: 0.75rem;
-    font-weight: 400;
-    color: var(--text2);
-    margin-bottom: 18px;
+  .scan-panel h2.target-acq-heading {
     display: flex;
-    align-items: center;
-    gap: 10px;
-    letter-spacing: 0.3em;
-    text-transform: uppercase;
+    justify-content: flex-start;
+    margin-bottom: 18px;
+    padding: 0;
+    border: none;
+    background: none;
   }
 
-  .scan-panel h2::before {
-    content: '';
+  #ta-canvas {
     display: block;
-    width: 20px; height: 1px;
-    background: #333;
-    flex-shrink: 0;
+    /* sized by JS */
   }
 
   .scan-form {
@@ -911,7 +905,7 @@
 
   <!-- Scan Panel -->
   <div class="scan-panel">
-    <h2>Target Acquisition</h2>
+    <h2 class="target-acq-heading"><canvas id="ta-canvas"></canvas></h2>
     <div class="scan-form">
       <div class="field-group">
         <label>Target Domain</label>
@@ -2208,6 +2202,175 @@ async function downloadReport() {
     vig.addColorStop(1, 'rgba(0,0,0,0.55)');
     ctx.fillStyle = vig;
     ctx.fillRect(0, 0, W, H);
+
+    requestAnimationFrame(drawFrame);
+  }
+
+  requestAnimationFrame(drawFrame);
+})();
+
+
+// ─── TARGET ACQUISITION heading canvas ───────────────────────────────────────
+(function initTAHeading() {
+  const canvas = document.getElementById('ta-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+
+  const TEXT    = 'TARGET ACQUISITION';
+  const FONT    = "700 18px 'Courier New', monospace";
+  const ORANGE  = '#c85a00';
+  const HOT     = '#ff8c2a';
+  const CHAR_SP = 3;
+
+  // Measure and size canvas
+  ctx.font = FONT;
+  const textW = ctx.measureText(TEXT).width + (TEXT.length - 1) * CHAR_SP;
+  const H = 32;
+  canvas.width  = Math.ceil(textW) + 4;
+  canvas.height = H;
+
+  let frame = 0;
+
+  // Sweep: horizontal (left-to-right), very slow
+  let sweepX = 0;
+  const sweepSpeed = 0.00133; // px per frame — ~15min per pass
+
+  // Flicker
+  let flicker = 1.0, flickerTarget = 1.0, flickerCooldown = 0;
+
+  // Glitch state: random horizontal band tears
+  let glitchBands = [];   // [{y, h, shift, life, maxLife}]
+  let glitchSpawnTimer = 24300 + Math.floor(Math.random() * 24300);
+
+  function spawnGlitch() {
+    const numBands = 1 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < numBands; i++) {
+      const bandH = 2 + Math.floor(Math.random() * 6);
+      glitchBands.push({
+        y:       Math.floor(Math.random() * H),
+        h:       bandH,
+        shift:   (Math.random() < 0.5 ? -1 : 1) * (2 + Math.random() * 8),
+        life:    0,
+        maxLife: 1 + Math.floor(Math.random() * 3),
+      });
+    }
+    // Next glitch: very slow — 12 to 30 seconds at 60fps
+    glitchSpawnTimer = 32400 + Math.floor(Math.random() * 32400);
+  }
+
+  function drawLetterspaced(text, x, y) {
+    let cx = x;
+    for (const ch of text) {
+      ctx.fillText(ch, cx, y);
+      cx += ctx.measureText(ch).width + CHAR_SP;
+    }
+  }
+
+  function drawFrame() {
+    frame++;
+    const W = canvas.width;
+
+    // ── Flicker ──────────────────────────────────────────────────────
+    if (flickerCooldown > 0) {
+      flickerCooldown--;
+    } else {
+      if (Math.random() < 0.012) {
+        flickerTarget = 0.1 + Math.random() * 0.25;
+        flickerCooldown = 1 + Math.floor(Math.random() * 3);
+      } else {
+        flickerTarget = 0.82 + Math.random() * 0.18;
+      }
+    }
+    flicker += (flickerTarget - flicker) * 0.35;
+
+    // ── Glitch spawn ─────────────────────────────────────────────────
+    glitchSpawnTimer--;
+    if (glitchSpawnTimer <= 0) spawnGlitch();
+
+    // Age out dead glitch bands
+    glitchBands = glitchBands.filter(b => b.life < b.maxLife);
+    glitchBands.forEach(b => b.life++);
+
+    ctx.clearRect(0, 0, W, H);
+    ctx.font = FONT;
+    ctx.textBaseline = 'middle';
+    const y = H / 2 + 1;
+
+    // ── Text glow passes ──────────────────────────────────────────────
+    ctx.save();
+    ctx.filter = 'blur(6px)';
+    ctx.globalAlpha = 0.4 * flicker;
+    ctx.fillStyle = ORANGE;
+    drawLetterspaced(TEXT, 2, y);
+    ctx.restore();
+
+    ctx.save();
+    ctx.filter = 'blur(2px)';
+    ctx.globalAlpha = 0.65 * flicker;
+    ctx.fillStyle = ORANGE;
+    drawLetterspaced(TEXT, 2, y);
+    ctx.restore();
+
+    ctx.save();
+    ctx.filter = 'none';
+    ctx.globalAlpha = flicker;
+    ctx.fillStyle = ORANGE;
+    drawLetterspaced(TEXT, 2, y);
+    ctx.restore();
+
+    ctx.save();
+    ctx.filter = 'blur(1px)';
+    ctx.globalAlpha = 0.18 * flicker;
+    ctx.fillStyle = HOT;
+    drawLetterspaced(TEXT, 2, y);
+    ctx.restore();
+
+    // ── Glitch bands (shift horizontal slices) ─────────────────────
+    for (const b of glitchBands) {
+      if (b.y + b.h > H || b.y < 0) continue;
+      // Copy the band and redraw offset
+      try {
+        const strip = ctx.getImageData(0, b.y, W, b.h);
+        ctx.putImageData(strip, b.shift, b.y);
+        // Optionally smear the original with dim fill to leave a ghost
+        ctx.fillStyle = `rgba(200,90,0,0.08)`;
+        ctx.fillRect(0, b.y, W, b.h);
+      } catch(e) {}
+    }
+
+    // ── Static scanlines (horizontal stripes) ─────────────────────
+    ctx.save();
+    for (let sy = 0; sy < H; sy += 2) {
+      ctx.fillStyle = 'rgba(0,0,0,0.30)';
+      ctx.fillRect(0, sy, W, 1);
+    }
+    ctx.restore();
+
+    // ── Moving sweep — LEFT TO RIGHT, very slow ───────────────────
+    sweepX = (sweepX + sweepSpeed) % W;
+    ctx.save();
+    const sweepGrad = ctx.createLinearGradient(sweepX - 10, 0, sweepX + 10, 0);
+    sweepGrad.addColorStop(0,    'rgba(255,160,60,0)');
+    sweepGrad.addColorStop(0.4,  'rgba(255,160,60,0.14)');
+    sweepGrad.addColorStop(0.5,  'rgba(255,160,60,0.28)');
+    sweepGrad.addColorStop(0.6,  'rgba(255,160,60,0.14)');
+    sweepGrad.addColorStop(1,    'rgba(255,160,60,0)');
+    ctx.fillStyle = sweepGrad;
+    ctx.fillRect(sweepX - 10, 0, 20, H);
+    ctx.restore();
+
+    // ── Grain ────────────────────────────────────────────────────
+    if (frame % 2 === 0) {
+      const imgData = ctx.getImageData(0, 0, W, H);
+      const d = imgData.data;
+      for (let i = 0; i < d.length; i += 12) {
+        const n = (Math.random() - 0.5) * 22;
+        d[i]   = Math.min(255, Math.max(0, d[i]   + n));
+        d[i+1] = Math.min(255, Math.max(0, d[i+1] + n * 0.4));
+        d[i+2] = Math.min(255, Math.max(0, d[i+2]));
+      }
+      ctx.putImageData(imgData, 0, 0);
+    }
 
     requestAnimationFrame(drawFrame);
   }
