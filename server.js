@@ -126,6 +126,66 @@ app.post('/api/scan', async (req, res) => {
   res.json({ jobId, status: 'running' });
 });
 
+// ─── GET /api/scan/:jobId/stream — SSE progress stream ───────────────────────
+// Streams progress events to the browser, keeping the connection alive with
+// periodic heartbeats. This avoids Render's 30s idle connection timeout
+// that kills plain HTTP polling when scans take longer.
+app.get('/api/scan/:jobId/stream', (req, res) => {
+  const job = jobs.get(req.params.jobId);
+  if (!job) { res.status(404).end(); return; }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // disable nginx buffering
+  res.flushHeaders();
+
+  const send = (data) => {
+    try { res.write(`data: ${JSON.stringify(data)}\n\n`); } catch {}
+  };
+
+  // Send initial state
+  send({ status: job.status, progress: job.progress });
+
+  // If already complete, send result and close
+  if (job.status === 'complete') {
+    send({ status: 'complete', result: job.result });
+    res.end();
+    return;
+  }
+
+  // Poll the job object and stream updates
+  let lastCompleted = -1;
+  const interval = setInterval(() => {
+    // Heartbeat keeps connection alive through proxies / Render timeout
+    if (job.status === 'running') {
+      const { completed, total } = job.progress || {};
+      if (completed !== lastCompleted) {
+        lastCompleted = completed;
+        send({ status: 'running', progress: job.progress });
+      } else {
+        // Heartbeat comment to prevent timeout
+        try { res.write(': heartbeat\n\n'); } catch {}
+      }
+    }
+
+    if (job.status === 'complete') {
+      clearInterval(interval);
+      send({ status: 'complete', result: job.result });
+      res.end();
+    }
+
+    if (job.status === 'error') {
+      clearInterval(interval);
+      send({ status: 'error', error: job.error });
+      res.end();
+    }
+  }, 1000);
+
+  // Clean up on client disconnect
+  req.on('close', () => clearInterval(interval));
+});
+
 // ─── GET /api/scan/:jobId — Poll job status ───────────────────────────────────
 app.get('/api/scan/:jobId', (req, res) => {
   const job = jobs.get(req.params.jobId);
