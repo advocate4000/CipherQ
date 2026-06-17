@@ -104,7 +104,7 @@
   .logo-lockup {
     display: flex;
     align-items: center;
-    gap: 18px;
+    gap: 4px;
     flex-shrink: 0;
   }
 
@@ -963,9 +963,9 @@
       <button class="results-tab" onclick="showTab('tab-hosts', this)">Host Detail</button>
       <button class="results-tab" onclick="showTab('tab-dns', this)">DNS Surface</button>
       <button class="results-tab" onclick="showTab('tab-roadmap', this)">Roadmap</button>
-      <button class="results-tab" onclick="showTab('tab-dns-security', this); loadDNSSecurity()">DNS Security</button>
-      <button class="results-tab" onclick="showTab('tab-http-security', this); loadHTTPSecurity()">HTTP Security</button>
-      <button class="results-tab" onclick="showTab('tab-network-security', this); loadNetworkSecurity()">Network &amp; Ports</button>
+      <button class="results-tab" onclick="showTab('tab-dns-security', this); loadDNSSecurity().catch(e => { document.getElementById('dns-security-content').innerHTML = '<div class=\'empty-state\'><p>Error: ' + e.message + '</p></div>'; console.error('[DNS]', e); })">DNS Security</button>
+      <button class="results-tab" onclick="showTab('tab-http-security', this); loadHTTPSecurity().catch(e => { document.getElementById('http-security-content').innerHTML = '<div class=\'empty-state\'><p>Error: ' + e.message + '</p></div>'; console.error('[HTTP]', e); })">HTTP Security</button>
+      <button class="results-tab" onclick="showTab('tab-network-security', this); loadNetworkSecurity().catch(e => { document.getElementById('network-security-content').innerHTML = '<div class=\'empty-state\'><p>Error: ' + e.message + '</p></div>'; console.error('[Network]', e); })">Network &amp; Ports</button>
     </div>
 
     <!-- Findings Tab -->
