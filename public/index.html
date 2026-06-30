@@ -413,6 +413,10 @@
     letter-spacing: 0.28em;
     color: var(--text2);
     font-weight: 400;
+    min-height: 1.7rem;     /* reserves space for up to 2 lines so .stat-value always starts at the same Y */
+    line-height: 1.3;
+    display: flex;
+    align-items: flex-start;
   }
 
   .stat-card .stat-value {
@@ -966,6 +970,8 @@
       <button class="results-tab" onclick="showTab('tab-dns-security', this); loadDNSSecurity().catch(e => { document.getElementById('dns-security-content').innerHTML = '<div class=\'empty-state\'><p>Error: ' + e.message + '</p></div>'; console.error('[DNS]', e); })">DNS Security</button>
       <button class="results-tab" onclick="showTab('tab-http-security', this); loadHTTPSecurity().catch(e => { document.getElementById('http-security-content').innerHTML = '<div class=\'empty-state\'><p>Error: ' + e.message + '</p></div>'; console.error('[HTTP]', e); })">HTTP Security</button>
       <button class="results-tab" onclick="showTab('tab-network-security', this); loadNetworkSecurity().catch(e => { document.getElementById('network-security-content').innerHTML = '<div class=\'empty-state\'><p>Error: ' + e.message + '</p></div>'; console.error('[Network]', e); })">Network &amp; Ports</button>
+      <button class="results-tab" onclick="showTab('tab-cbom', this); loadCBOMDashboard().catch(e => { document.getElementById('cbom-dashboard-content').innerHTML = '<div class=\'empty-state\'><p>Error: ' + e.message + '</p></div>'; console.error('[CBOM]', e); })">CBOM Dashboard</button>
+      <button class="results-tab" onclick="showTab('tab-vendor', this)">Vendor Scorecard</button>
     </div>
 
     <!-- Findings Tab -->
@@ -1053,6 +1059,86 @@
       </div>
     </div>
 
+    <!-- CBOM Dashboard Tab -->
+    <div class="tab-panel" id="tab-cbom">
+      <div id="cbom-dashboard-content">
+        <div class="empty-state">
+          <div class="icon">◈</div>
+          <p>Loading board-level CBOM dashboard…</p>
+        </div>
+      </div>
+
+      <div class="scan-panel" style="margin-top:24px">
+        <h2>Internal Discovery</h2>
+        <p style="color:var(--text2);font-size:12px;margin-bottom:16px">
+          Scan source code or an internal certificate store on a path the CipherQ server process can read.
+          Self-hosted deployments can point this at any local checkout; on Render this is limited to paths
+          already present on the running instance.
+        </p>
+        <div class="scan-form">
+          <div class="field-group">
+            <label>Filesystem Path</label>
+            <input type="text" id="internal-path-input" placeholder="/path/to/source-or-certs">
+          </div>
+          <div class="field-group">
+            <label>Project / Asset Label</label>
+            <input type="text" id="internal-label-input" placeholder="e.g. acme-backend">
+          </div>
+          <div class="field-group" style="justify-content:flex-end">
+            <label>&nbsp;</label>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-ghost" onclick="runInternalScan('code')">Code/SCA Scan</button>
+              <button class="btn btn-ghost" onclick="runInternalScan('pki')">PKI Scan</button>
+            </div>
+          </div>
+        </div>
+        <div id="internal-scan-status" style="margin-top:12px;font-size:12px;color:var(--text2)"></div>
+        <div id="internal-scan-results" style="margin-top:16px"></div>
+      </div>
+    </div>
+
+    <!-- Vendor Scorecard Tab -->
+    <div class="tab-panel" id="tab-vendor">
+      <div class="scan-panel">
+        <h2>Vendor Security Scorecard</h2>
+        <p style="color:var(--text2);font-size:12px;margin-bottom:16px">
+          Run a live technical assessment against a vendor's own domain — direct evidence rather than a
+          self-reported questionnaire.
+        </p>
+        <div class="scan-form">
+          <div class="field-group">
+            <label>Vendor Name</label>
+            <input type="text" id="vendor-name-input" placeholder="e.g. Acme SaaS Inc">
+          </div>
+          <div class="field-group">
+            <label>Vendor Domain</label>
+            <input type="text" id="vendor-domain-input" placeholder="e.g. acmesaas.com">
+          </div>
+          <div class="field-group" style="justify-content:flex-end">
+            <label>&nbsp;</label>
+            <button class="btn btn-primary" id="vendor-assess-btn" onclick="runVendorAssessment()">
+              <span>▶</span> Assess Vendor
+            </button>
+          </div>
+        </div>
+        <label class="check-label" style="margin-top:10px">
+          <input type="checkbox" id="vendor-network-scan"> Include network/port scan (slower, more thorough)
+        </label>
+        <div class="progress-bar" id="vendor-progress-bar"><div class="progress-fill" id="vendor-progress-fill" style="width:0%"></div></div>
+        <div class="progress-label" id="vendor-progress-label"></div>
+      </div>
+
+      <div id="vendor-results-content"></div>
+
+      <div class="host-table-card" style="margin-top:20px">
+        <div class="section-header"><h3>Previously Assessed Vendors</h3></div>
+        <table id="vendor-history-table">
+          <thead><tr><th>Vendor</th><th>Domain</th><th>Grade</th><th>Score</th><th>Last Assessed</th></tr></thead>
+          <tbody id="vendor-history-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
   </div><!-- /#results -->
 
 </div><!-- /.shell -->
@@ -1096,6 +1182,9 @@ async function startScan() {
   httpSecData = null;
   networkSecLoaded = false;
   networkSecData = null;
+  boardMetricsData = null;
+  window.lastCodeScanData = null;
+  window.lastPkiScanData = null;
 
   const bar = document.getElementById('progress-bar');
   const fill = document.getElementById('progress-fill');
@@ -2032,10 +2121,14 @@ async function downloadReport() {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            scanResult:  scanData,
-            dnsData:     dnsSecData     || null,
-            httpData:    httpSecData    || null,
-            networkData: networkSecData || null,
+            scanResult:   scanData,
+            dnsData:      dnsSecData       || null,
+            httpData:     httpSecData      || null,
+            networkData:  networkSecData   || null,
+            boardMetrics: boardMetricsData || null,
+            codeData:     window.lastCodeScanData || null,
+            pkiData:      window.lastPkiScanData  || null,
+            vendorData:   currentVendorResult     || null,
           }),
         },
         90000   // 90s client timeout — report generation can be slow
@@ -2089,6 +2182,271 @@ async function downloadReport() {
     btn.innerHTML = '<span>⬇</span> Download Report (.docx)';
   }
 }
+
+// ─── CBOM Board Dashboard ─────────────────────────────────────────────────────
+let boardMetricsData = null;
+
+async function loadCBOMDashboard() {
+  if (!scanData) {
+    document.getElementById('cbom-dashboard-content').innerHTML = `<div class="empty-state"><div class="icon">◈</div><p>Run a domain scan first to populate the CBOM dashboard.</p></div>`;
+    return;
+  }
+
+  const container = document.getElementById('cbom-dashboard-content');
+  container.innerHTML = `<div class="empty-state"><div class="icon">◈</div><p>Persisting scan results to CBOM and computing board metrics…</p></div>`;
+
+  try {
+    await fetch('/api/cbom/persist', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        domain: scanData.summary.domain,
+        scanResult: scanData,
+        dnsData: dnsSecData || null,
+        httpData: httpSecData || null,
+        networkData: networkSecData || null,
+      }),
+    });
+
+    const metrics = await fetch(`/api/cbom/board-metrics/${encodeURIComponent(scanData.summary.domain)}`).then(r => r.json());
+    boardMetricsData = metrics;
+    renderCBOMDashboard(metrics);
+  } catch (e) {
+    container.innerHTML = `<div class="empty-state"><div class="icon">◈</div><p>Failed to load CBOM dashboard: ${e.message}</p></div>`;
+  }
+}
+
+function renderCBOMDashboard(m) {
+  const container = document.getElementById('cbom-dashboard-content');
+  const qeiColour = m.quantumExposureIndex >= 70 ? 'var(--danger)' : m.quantumExposureIndex >= 40 ? 'var(--warn)' : 'var(--ok)';
+  const qeiLabel  = m.quantumExposureIndex >= 70 ? 'HIGH EXPOSURE' : m.quantumExposureIndex >= 40 ? 'MODERATE EXPOSURE' : 'LOW EXPOSURE';
+  const trend = m.quantumExposureTrend;
+
+  container.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:24px">
+      <div style="background:var(--surface);border:1px solid ${qeiColour};border-radius:10px;padding:24px;text-align:center">
+        <div style="font-size:0.55rem;letter-spacing:0.28em;color:var(--text2);font-weight:400;margin-bottom:10px">QUANTUM EXPOSURE INDEX</div>
+        <div style="font-size:3rem;font-weight:800;color:${qeiColour};font-family:var(--font-mono);line-height:1">${m.quantumExposureIndex}</div>
+        <div style="font-size:0.7rem;color:${qeiColour};font-weight:700;margin-top:8px;letter-spacing:0.1em">${qeiLabel}</div>
+        ${trend !== null && trend !== undefined ? `<div style="font-size:0.65rem;color:var(--text2);margin-top:8px">${trend > 0 ? '▲' : trend < 0 ? '▼' : '—'} ${Math.abs(trend)} vs previous scan</div>` : ''}
+      </div>
+      <div style="background:var(--surface);border:1px solid var(--border-hi);border-radius:10px;padding:24px;text-align:center">
+        <div style="font-size:0.55rem;letter-spacing:0.28em;color:var(--text2);font-weight:400;margin-bottom:10px">CRYPTOGRAPHIC DEBT</div>
+        <div style="font-size:3rem;font-weight:800;color:var(--text);font-family:var(--font-mono);line-height:1">${m.cryptographicDebt.openFindings}</div>
+        <div style="font-size:0.7rem;color:var(--text2);margin-top:8px">~${m.cryptographicDebt.estimatedEffortDays} engineer-days to remediate</div>
+      </div>
+    </div>
+
+    <div class="summary-grid" style="margin-bottom:24px">
+      <div class="stat-card"><div class="stat-label">Total Assets</div><div class="stat-value">${m.assetInventory.total}</div></div>
+      <div class="stat-card"><div class="stat-label">PQ None</div><div class="stat-value" style="color:var(--danger)">${m.assetInventory.pqNone}</div></div>
+      <div class="stat-card"><div class="stat-label">PQ Unknown</div><div class="stat-value" style="color:var(--warn)">${m.assetInventory.pqUnknown}</div></div>
+      <div class="stat-card"><div class="stat-label">PQ Ready</div><div class="stat-value" style="color:var(--ok)">${m.assetInventory.pqReady}</div></div>
+      <div class="stat-card"><div class="stat-label">PQ Ready %</div><div class="stat-value" style="color:var(--ok)">${m.assetInventory.pqReadyPercent}%</div></div>
+      <div class="stat-card"><div class="stat-label">Active Waivers</div><div class="stat-value">${m.riskRegister.activeWaivers}</div></div>
+    </div>
+
+    <div class="host-table-card">
+      <div class="section-header"><h3>Open Findings by Severity</h3></div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:16px">
+        <div style="text-align:center;padding:10px;border-radius:6px;background:var(--danger-dim)"><div style="font-size:1.7rem;font-weight:800;color:var(--danger);font-family:var(--font-mono)">${m.findingsOpen.critical}</div><div style="font-size:0.6rem;color:var(--danger);text-transform:uppercase;letter-spacing:0.1em">Critical</div></div>
+        <div style="text-align:center;padding:10px;border-radius:6px;background:var(--warn-dim)"><div style="font-size:1.7rem;font-weight:800;color:var(--warn);font-family:var(--font-mono)">${m.findingsOpen.high}</div><div style="font-size:0.6rem;color:var(--warn);text-transform:uppercase;letter-spacing:0.1em">High</div></div>
+        <div style="text-align:center;padding:10px;border-radius:6px;background:var(--info-dim)"><div style="font-size:1.7rem;font-weight:800;color:var(--info);font-family:var(--font-mono)">${m.findingsOpen.medium}</div><div style="font-size:0.6rem;color:var(--info);text-transform:uppercase;letter-spacing:0.1em">Medium</div></div>
+        <div style="text-align:center;padding:10px;border-radius:6px;background:var(--ok-dim)"><div style="font-size:1.7rem;font-weight:800;color:var(--ok);font-family:var(--font-mono)">${m.findingsOpen.low}</div><div style="font-size:0.6rem;color:var(--ok);text-transform:uppercase;letter-spacing:0.1em">Low</div></div>
+      </div>
+    </div>
+
+    <div style="margin-top:12px;padding:12px 16px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;font-size:0.7rem;color:var(--text2)">
+      ${m.riskRegister.upcomingReviews30d > 0
+        ? `⚠ ${m.riskRegister.upcomingReviews30d} risk register review(s) due within 30 days.`
+        : 'No risk register reviews due in the next 30 days.'}
+    </div>
+  `;
+}
+
+// ─── Internal Discovery (Code/SCA + PKI) ──────────────────────────────────────
+async function runInternalScan(type) {
+  const rootPath = document.getElementById('internal-path-input').value.trim();
+  const domain = document.getElementById('internal-label-input').value.trim() || (scanData?.summary?.domain) || 'internal-project';
+  const statusEl = document.getElementById('internal-scan-status');
+  const resultsEl = document.getElementById('internal-scan-results');
+
+  if (!rootPath) { alert('Please enter a filesystem path to scan.'); return; }
+
+  statusEl.textContent = `Running ${type === 'code' ? 'code/SCA' : 'PKI'} scan on ${rootPath}…`;
+  statusEl.style.color = 'var(--accent)';
+  resultsEl.innerHTML = '';
+
+  try {
+    const endpoint = type === 'code' ? '/api/internal/code-scan' : '/api/internal/pki-scan';
+    const resp = await fetch(endpoint, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ rootPath, domain }),
+    });
+    const data = await resp.json();
+
+    if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+
+    if (type === 'code') {
+      window.lastCodeScanData = data;
+      statusEl.textContent = `✓ Scanned ${data.filesScanned} files — ${data.findings.length} finding(s)`;
+      statusEl.style.color = 'var(--ok)';
+      renderInternalFindings(resultsEl, data.findings.map(f => ({
+        severity: f.severity, title: f.name, hostname: `${f.file}${f.line ? ':'+f.line : ''}`,
+        detail: f.detail, recommendation: f.recommendation, nistRef: f.nistRef,
+      })), 'Code / SCA');
+    } else {
+      window.lastPkiScanData = data;
+      statusEl.textContent = `✓ Found ${data.certificatesParsed} certificate(s) — ${data.findings.length} finding(s)`;
+      statusEl.style.color = 'var(--ok)';
+      renderInternalFindings(resultsEl, data.findings.map(f => ({
+        severity: f.severity, title: f.title, hostname: f.file || '',
+        detail: f.detail, recommendation: f.recommendation, nistRef: f.nistRef,
+      })), 'Internal PKI');
+    }
+  } catch (e) {
+    statusEl.textContent = `Error: ${e.message}`;
+    statusEl.style.color = 'var(--danger)';
+  }
+}
+
+function renderInternalFindings(container, findings, label) {
+  if (findings.length === 0) {
+    container.innerHTML = `<div class="empty-state"><div class="icon">◈</div><p>No ${label} findings.</p></div>`;
+    return;
+  }
+  const sevOrder = ['critical','high','medium','low','info'];
+  const sorted = [...findings].sort((a,b) => sevOrder.indexOf(a.severity) - sevOrder.indexOf(b.severity));
+
+  container.innerHTML = `
+    <div class="findings-section">
+      <div class="section-header"><h3>${label} Findings</h3><span class="count-badge">${sorted.filter(f=>f.severity!=='info').length}</span></div>
+      ${sorted.map((f,i) => `
+        <div class="finding-item" onclick="toggleFinding('int${i}')">
+          <div class="finding-host">${f.hostname}</div>
+          <div class="finding-header"><span class="sev-badge sev-${f.severity}">${f.severity}</span><span class="finding-title">${f.title}</span></div>
+          <div class="finding-detail" id="int${i}">
+            <p>${f.detail}</p>
+            ${f.recommendation ? `<div class="finding-rec">→ ${f.recommendation}</div>` : ''}
+            ${f.nistRef ? `<div class="finding-nist">NIST: ${f.nistRef}</div>` : ''}
+          </div>
+        </div>`).join('')}
+    </div>`;
+}
+
+// ─── Vendor Scorecard ──────────────────────────────────────────────────────────
+let currentVendorResult = null;
+
+async function runVendorAssessment() {
+  const vendorName = document.getElementById('vendor-name-input').value.trim();
+  const domain = document.getElementById('vendor-domain-input').value.trim().replace(/^https?:\/\//i,'').replace(/\/.*$/,'');
+  const includeNetwork = document.getElementById('vendor-network-scan').checked;
+
+  if (!vendorName || !domain) { alert('Please enter both a vendor name and domain.'); return; }
+
+  const btn = document.getElementById('vendor-assess-btn');
+  const bar = document.getElementById('vendor-progress-bar');
+  const fill = document.getElementById('vendor-progress-fill');
+  const label = document.getElementById('vendor-progress-label');
+
+  btn.disabled = true;
+  btn.textContent = '⏳ Assessing…';
+  bar.classList.add('visible');
+  label.classList.add('visible');
+  fill.style.width = '10%';
+  label.textContent = 'Starting vendor assessment…';
+
+  try {
+    const resp = await fetch('/api/vendor/assess', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ vendorName, domain, includeNetworkScan: includeNetwork }),
+    });
+    const { jobId } = await resp.json();
+
+    let pct = 10;
+    while (true) {
+      await new Promise(r => setTimeout(r, 2000));
+      const poll = await fetch(`/api/vendor/assess/${jobId}`).then(r => r.json());
+
+      if (poll.progress?.message) label.textContent = poll.progress.message;
+      pct = Math.min(pct + 8, 90);
+      fill.style.width = `${pct}%`;
+
+      if (poll.status === 'complete') {
+        fill.style.width = '100%';
+        currentVendorResult = poll.result;
+        renderVendorScorecard(poll.result);
+        loadVendorHistory();
+        break;
+      }
+      if (poll.status === 'error') throw new Error(poll.error);
+    }
+  } catch (e) {
+    label.textContent = `Error: ${e.message}`;
+    label.style.color = 'var(--danger)';
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<span>▶</span> Assess Vendor';
+  }
+}
+
+function renderVendorScorecard(result) {
+  const { vendor, scorecard } = result;
+  const container = document.getElementById('vendor-results-content');
+  const gradeColours = { A:'var(--ok)', B:'var(--ok)', C:'var(--warn)', D:'var(--danger)', F:'var(--danger)' };
+  const gradeColour = gradeColours[scorecard.grade] || 'var(--info)';
+
+  const catLabels = { pqReadiness:'PQ / TLS Readiness', emailSecurity:'Email Security', webSecurity:'Web Security', networkExposure:'Network Exposure', certHygiene:'Cert Hygiene' };
+
+  container.innerHTML = `
+    <div style="display:grid;grid-template-columns:200px 1fr;gap:16px;margin:20px 0">
+      <div style="background:var(--surface);border:1px solid ${gradeColour};border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px">
+        <div style="font-size:3.5rem;font-weight:800;color:${gradeColour};font-family:var(--font-mono);line-height:1">${scorecard.grade}</div>
+        <div style="font-size:0.75rem;color:var(--text2);margin-top:8px">${scorecard.overallScore} / 100</div>
+      </div>
+      <div class="host-table-card">
+        <div class="section-header"><h3>${vendor.name} — Category Breakdown</h3></div>
+        <div style="padding:14px 16px">
+          ${Object.entries(scorecard.categoryScores).map(([cat,score]) => {
+            const grade = scorecard.categoryGrades[cat];
+            const col = gradeColours[grade] || 'var(--info)';
+            return `<div class="ca-bar-row" style="margin-bottom:8px">
+              <div class="ca-name">${catLabels[cat]||cat}</div>
+              <div class="ca-bar-track"><div class="ca-bar-fill" style="width:${score}%;background:${col}"></div></div>
+              <div class="ca-count" style="color:${col};font-weight:700">${grade}</div>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>
+    </div>
+
+    <div class="findings-section">
+      <div class="section-header"><h3>Top Concerns</h3><span class="count-badge">${scorecard.topConcerns.length}</span></div>
+      ${scorecard.topConcerns.length === 0
+        ? '<div class="empty-state"><div class="icon">◈</div><p>No critical or high-severity findings.</p></div>'
+        : scorecard.topConcerns.map(c => `
+          <div class="finding-item">
+            <div class="finding-host">${c.hostname||''}</div>
+            <div class="finding-header"><span class="sev-badge sev-${c.severity}">${c.severity}</span><span class="finding-title">${c.title}</span></div>
+          </div>`).join('')}
+    </div>
+  `;
+}
+
+async function loadVendorHistory() {
+  try {
+    const { vendors } = await fetch('/api/vendor').then(r => r.json());
+    const tbody = document.getElementById('vendor-history-tbody');
+    tbody.innerHTML = vendors.map(v => `
+      <tr>
+        <td>${v.name}</td>
+        <td class="mono">${v.domain}</td>
+        <td style="font-weight:700">${v.grade||'—'}</td>
+        <td>${v.overallScore??'—'}</td>
+        <td class="mono" style="font-size:10px">${v.lastAssessedAt ? new Date(v.lastAssessedAt).toLocaleDateString() : '—'}</td>
+      </tr>`).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--text2)">No vendors assessed yet</td></tr>';
+  } catch {}
+}
+document.addEventListener('DOMContentLoaded', () => { loadVendorHistory(); });
 
 
 // ─── CQ Canvas Logo ────────────────────────────────────────────────────────
