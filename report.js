@@ -942,6 +942,277 @@ function buildControlMapping() {
   ];
 }
 
+// ─── CBOM Board Metrics Section ───────────────────────────────────────────────
+
+function buildCBOMSection(m) {
+  if (!m) return [];
+
+  const qeiColour = m.quantumExposureIndex >= 70 ? COLOURS.danger
+                  : m.quantumExposureIndex >= 40 ? COLOURS.warn
+                  : COLOURS.ok;
+
+  const colW = [3500, 3000, 2860];
+  return [
+    sectionHeading('CBOM Board Metrics'),
+    bodyText(
+      `The Cryptographic Bill of Materials (CBOM) dashboard provides a longitudinal view of cryptographic posture ` +
+      `across ${m.totalScans || 1} scan(s) of this domain. The Quantum Exposure Index (QEI) is a composite score ` +
+      `(0–100, lower is better) derived from PQ readiness, HNDL risk, and finding severity.`
+    ),
+    spacer(8),
+
+    new Table({
+      width: { size: CONTENT_WIDTH, type: WidthType.DXA },
+      columnWidths: [CONTENT_WIDTH / 2, CONTENT_WIDTH / 2],
+      borders: ALL_BORDERS,
+      rows: [
+        new TableRow({ children: [
+          cell([
+            new Paragraph({ alignment: AlignmentType.CENTER, children: [
+              new TextRun({ text: String(m.quantumExposureIndex ?? '—'), bold: true, size: 72, color: qeiColour, font: 'Arial' }),
+            ], spacing: { after: 0 } }),
+            new Paragraph({ alignment: AlignmentType.CENTER, children: [
+              new TextRun({ text: 'QUANTUM EXPOSURE INDEX', size: 14, color: COLOURS.midGrey, font: 'Arial' }),
+            ], spacing: { after: 0 } }),
+          ], { width: CONTENT_WIDTH / 2, bg: COLOURS.lightGrey }),
+          cell([
+            new Paragraph({ alignment: AlignmentType.CENTER, children: [
+              new TextRun({ text: String(m.cryptographicDebt?.openFindings ?? '—'), bold: true, size: 72, color: COLOURS.navy, font: 'Arial' }),
+            ], spacing: { after: 0 } }),
+            new Paragraph({ alignment: AlignmentType.CENTER, children: [
+              new TextRun({ text: `OPEN FINDINGS  ·  ~${m.cryptographicDebt?.estimatedEffortDays ?? '?'} engineer-days`, size: 14, color: COLOURS.midGrey, font: 'Arial' }),
+            ], spacing: { after: 0 } }),
+          ], { width: CONTENT_WIDTH / 2, bg: COLOURS.lightGrey }),
+        ]}),
+      ],
+    }),
+
+    spacer(8),
+
+    new Table({
+      width: { size: CONTENT_WIDTH, type: WidthType.DXA },
+      columnWidths: colW,
+      borders: ALL_BORDERS,
+      rows: [
+        new TableRow({ children: [
+          headerCell('Asset',                colW[0]),
+          headerCell('Value',                colW[1]),
+          headerCell('Detail',               colW[2]),
+        ]}),
+        ...([
+          ['Total assets probed',  String(m.assetInventory?.total      ?? '—'), 'Unique hostnames probed in latest scan'],
+          ['PQ Ready',             String(m.assetInventory?.pqReady    ?? '—'), `${m.assetInventory?.pqReadyPercent ?? 0}% of reachable hosts`],
+          ['PQ None / Unknown',    `${m.assetInventory?.pqNone ?? 0} / ${m.assetInventory?.pqUnknown ?? 0}`, 'Classical ECDHE or KEX group unconfirmed'],
+          ['Active waivers',       String(m.riskRegister?.activeWaivers ?? 0), 'Risk-accepted findings currently in waiver'],
+          ['Reviews due (30 d)',   String(m.riskRegister?.upcomingReviews30d ?? 0), 'Waiver reviews due within 30 days'],
+        ].map(([k, v, d], i) => new TableRow({ children: [
+          cell(k, { width: colW[0], bg: i % 2 === 0 ? COLOURS.white : COLOURS.lightGrey, bold: true,  fontSize: 18 }),
+          cell(v, { width: colW[1], bg: i % 2 === 0 ? COLOURS.white : COLOURS.lightGrey, fontSize: 18 }),
+          cell(d, { width: colW[2], bg: i % 2 === 0 ? COLOURS.white : COLOURS.lightGrey, fontSize: 16, color: COLOURS.midGrey }),
+        ]}))),
+      ],
+    }),
+    spacer(8),
+  ];
+}
+
+// ─── Code / SCA Section ───────────────────────────────────────────────────────
+
+function buildCodeScanSection(codeData) {
+  if (!codeData?.findings) return [];
+
+  const sevOrder = ['critical', 'high', 'medium', 'low', 'info'];
+  const sorted   = [...codeData.findings].sort((a, b) => sevOrder.indexOf(a.severity) - sevOrder.indexOf(b.severity));
+
+  const children = [
+    sectionHeading('Internal Code / SCA Scan'),
+    bodyText(
+      `Static source analysis was performed on ${codeData.filesScanned} file(s) under ${codeData.rootPath}. ` +
+      `${sorted.length} finding(s) were identified covering cryptographic API usage, hardcoded secrets, ` +
+      `dependency version pinning, and TLS configuration patterns.`
+    ),
+    spacer(6),
+  ];
+
+  if (sorted.length === 0) {
+    children.push(bodyText('No code / SCA findings identified.'));
+    return children;
+  }
+
+  const colW = [1600, 1200, 2800, 3760];
+  children.push(new Table({
+    width: { size: CONTENT_WIDTH, type: WidthType.DXA },
+    columnWidths: colW,
+    borders: ALL_BORDERS,
+    rows: [
+      new TableRow({ children: [
+        headerCell('Severity', colW[0]),
+        headerCell('File',     colW[1]),
+        headerCell('Finding',  colW[2]),
+        headerCell('Detail',   colW[3]),
+      ]}),
+      ...sorted.map((f, i) => {
+        const style = SEV_STYLE[f.severity] || SEV_STYLE.info;
+        return new TableRow({ children: [
+          cell(style.label,  { width: colW[0], bg: style.bg, color: style.text, bold: true, fontSize: 16 }),
+          cell(`${f.file || ''}${f.line ? `:${f.line}` : ''}`, { width: colW[1], bg: i % 2 === 0 ? COLOURS.white : COLOURS.lightGrey, fontSize: 14 }),
+          cell(f.name || f.title, { width: colW[2], bg: i % 2 === 0 ? COLOURS.white : COLOURS.lightGrey, bold: true, fontSize: 16 }),
+          cell(f.recommendation || f.detail || '', { width: colW[3], bg: i % 2 === 0 ? COLOURS.white : COLOURS.lightGrey, fontSize: 16 }),
+        ]});
+      }),
+    ],
+  }));
+
+  return [...children, spacer(8)];
+}
+
+// ─── PKI Scan Section ─────────────────────────────────────────────────────────
+
+function buildPKIScanSection(pkiData) {
+  if (!pkiData?.findings) return [];
+
+  const sevOrder = ['critical', 'high', 'medium', 'low', 'info'];
+  const sorted   = [...pkiData.findings].sort((a, b) => sevOrder.indexOf(a.severity) - sevOrder.indexOf(b.severity));
+
+  const children = [
+    sectionHeading('Internal PKI / Certificate Scan'),
+    bodyText(
+      `${pkiData.certificatesParsed} certificate(s) were parsed from ${pkiData.filesScanned} file(s) under ${pkiData.rootPath}. ` +
+      `Certificates were assessed for expiry, key strength, and post-quantum migration readiness.`
+    ),
+    spacer(6),
+  ];
+
+  if (sorted.length === 0) {
+    children.push(bodyText('No PKI findings identified.'));
+    return children;
+  }
+
+  for (const f of sorted) {
+    const style = SEV_STYLE[f.severity] || SEV_STYLE.info;
+    children.push(
+      new Table({
+        width: { size: CONTENT_WIDTH, type: WidthType.DXA },
+        columnWidths: [1400, CONTENT_WIDTH - 1400],
+        borders: NO_BORDERS,
+        rows: [new TableRow({ children: [
+          cell(style.label, { width: 1400, bg: style.text, color: COLOURS.white, bold: true, fontSize: 18, borders: NO_BORDERS }),
+          cell(f.title,     { width: CONTENT_WIDTH - 1400, bg: style.bg, color: style.text, bold: true, fontSize: 18, borders: NO_BORDERS }),
+        ]})],
+      }),
+      new Table({
+        width: { size: CONTENT_WIDTH, type: WidthType.DXA },
+        columnWidths: [1800, CONTENT_WIDTH - 1800],
+        borders: ALL_BORDERS,
+        rows: [
+          new TableRow({ children: [
+            cell('File',           { width: 1800, bg: COLOURS.lightGrey, bold: true, fontSize: 18 }),
+            cell(f.file || '—',    { width: CONTENT_WIDTH - 1800, fontSize: 18 }),
+          ]}),
+          new TableRow({ children: [
+            cell('Detail',         { width: 1800, bg: COLOURS.lightGrey, bold: true, fontSize: 18 }),
+            cell(f.detail,         { width: CONTENT_WIDTH - 1800, fontSize: 18 }),
+          ]}),
+          ...(f.recommendation ? [new TableRow({ children: [
+            cell('Recommendation', { width: 1800, bg: COLOURS.lightGrey, bold: true, fontSize: 18 }),
+            cell(f.recommendation, { width: CONTENT_WIDTH - 1800, color: COLOURS.ok, bold: true, fontSize: 18 }),
+          ]})] : []),
+          ...(f.nistRef ? [new TableRow({ children: [
+            cell('NIST Ref',       { width: 1800, bg: COLOURS.lightGrey, bold: true, fontSize: 18 }),
+            cell(f.nistRef,        { width: CONTENT_WIDTH - 1800, fontSize: 16 }),
+          ]})] : []),
+        ],
+      }),
+      spacer(6),
+    );
+  }
+
+  return [...children, spacer(8)];
+}
+
+// ─── Vendor Scorecard Section ─────────────────────────────────────────────────
+
+function buildVendorSection(vendorData) {
+  if (!vendorData?.vendor || !vendorData?.scorecard) return [];
+
+  const { vendor, scorecard } = vendorData;
+  const gradeColour = { A: COLOURS.ok, B: COLOURS.ok, C: COLOURS.warn, D: COLOURS.danger, F: COLOURS.danger };
+  const colour      = gradeColour[scorecard.grade] || COLOURS.navy;
+
+  const catLabels = {
+    pqReadiness:     'PQ / TLS Readiness (max 25)',
+    emailSecurity:   'Email Security (max 20)',
+    webSecurity:     'Web Security (max 20)',
+    networkExposure: 'Network Exposure (max 20)',
+    certHygiene:     'Certificate Hygiene (max 15)',
+  };
+
+  const colW = [3500, 2000, 3860];
+
+  return [
+    sectionHeading('Vendor Security Scorecard'),
+    bodyText(
+      `An automated technical assessment was performed against ${vendor.name} (${vendor.domain}) ` +
+      `on ${new Date(vendor.assessedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}. ` +
+      `The scorecard measures externally-observable security posture across five categories.`
+    ),
+    spacer(8),
+
+    // Grade card + category breakdown side-by-side
+    ...Object.entries(scorecard.categoryScores).map(([cat, score], i) => {
+      const grade = scorecard.categoryGrades[cat];
+      const gc    = gradeColour[grade] || COLOURS.navy;
+      return new Table({
+        width: { size: CONTENT_WIDTH, type: WidthType.DXA },
+        columnWidths: [2000, CONTENT_WIDTH - 3000, 1000],
+        borders: ALL_BORDERS,
+        rows: [new TableRow({ children: [
+          ...(i === 0 ? [cell([
+            new Paragraph({ alignment: AlignmentType.CENTER, children: [
+              new TextRun({ text: scorecard.grade, bold: true, size: 96, color: colour, font: 'Arial' }),
+            ], spacing: { after: 0 } }),
+            new Paragraph({ alignment: AlignmentType.CENTER, children: [
+              new TextRun({ text: `${scorecard.overallScore} / 100`, size: 20, color: COLOURS.midGrey, font: 'Arial' }),
+            ], spacing: { after: 0 } }),
+          ], { width: 2000, bg: COLOURS.lightGrey })] : [
+            cell('', { width: 2000, bg: COLOURS.lightGrey }),
+          ]),
+          cell(catLabels[cat] || cat, { width: CONTENT_WIDTH - 3000, bg: i % 2 === 0 ? COLOURS.white : COLOURS.lightGrey, fontSize: 18 }),
+          cell(`${grade}  (${score})`,  { width: 1000,               bg: i % 2 === 0 ? COLOURS.white : COLOURS.lightGrey, bold: true, color: gc, fontSize: 18 }),
+        ]})],
+      });
+    }),
+
+    spacer(8),
+
+    ...(scorecard.topConcerns?.length > 0 ? [
+      new Paragraph({ children: [new TextRun({ text: 'Top Concerns', bold: true, size: 22, color: COLOURS.navy, font: 'Arial' })], spacing: { before: 80, after: 80 } }),
+      new Table({
+        width: { size: CONTENT_WIDTH, type: WidthType.DXA },
+        columnWidths: colW,
+        borders: ALL_BORDERS,
+        rows: [
+          new TableRow({ children: [
+            headerCell('Severity', colW[0]),
+            headerCell('Host',     colW[1]),
+            headerCell('Finding',  colW[2]),
+          ]}),
+          ...scorecard.topConcerns.slice(0, 8).map((f, i) => {
+            const style = SEV_STYLE[f.severity] || SEV_STYLE.info;
+            return new TableRow({ children: [
+              cell(style.label,  { width: colW[0], bg: style.bg, color: style.text, bold: true, fontSize: 16 }),
+              cell(f.hostname || '—', { width: colW[1], bg: i % 2 === 0 ? COLOURS.white : COLOURS.lightGrey, fontSize: 16 }),
+              cell(f.title,      { width: colW[2], bg: i % 2 === 0 ? COLOURS.white : COLOURS.lightGrey, fontSize: 16 }),
+            ]});
+          }),
+        ],
+      }),
+    ] : []),
+
+    spacer(8),
+  ];
+}
+
 // ─── Main generator ───────────────────────────────────────────────────────────
 
 // ─── HTTP Security Section ────────────────────────────────────────────────────
@@ -1173,7 +1444,16 @@ function buildNetworkSection(networkData) {
   return children;
 }
 
-async function generateReport(scanResult, dnsData = null, httpData = null, networkData = null) {
+async function generateReport(
+  scanResult,
+  dnsData      = null,
+  httpData     = null,
+  networkData  = null,
+  boardMetrics = null,
+  codeData     = null,
+  pkiData      = null,
+  vendorData   = null,
+) {
   const { summary, hosts, findings } = scanResult;
 
   const scanDate = new Date(summary.scanTime).toLocaleDateString('en-GB', {
@@ -1230,10 +1510,14 @@ async function generateReport(scanResult, dnsData = null, httpData = null, netwo
       children: [
         ...buildCoverPage(summary),
         ...buildExecutiveSummary(summary, findings, dnsData, httpData, networkData),
+        ...(boardMetrics ? buildCBOMSection(boardMetrics)  : []),
         ...buildFindings(findings),
         ...(dnsData     ? buildDNSSection(dnsData)         : []),
         ...(httpData    ? buildHTTPSection(httpData)        : []),
         ...(networkData ? buildNetworkSection(networkData)  : []),
+        ...(codeData    ? buildCodeScanSection(codeData)   : []),
+        ...(pkiData     ? buildPKIScanSection(pkiData)     : []),
+        ...(vendorData  ? buildVendorSection(vendorData)   : []),
         ...buildHostInventory(hosts),
         ...buildRoadmap(summary),
         ...buildControlMapping(),

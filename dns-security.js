@@ -127,10 +127,12 @@ function attemptAXFR(nameserver, domain, timeoutMs = 8000) {
     sock.on('timeout', () => done({ vulnerable: false, nameserver, reason: 'timeout' }));
     sock.on('error',   (e) => done({ vulnerable: false, nameserver, reason: e.code || e.message }));
     sock.on('end',     () => {
-      // Check response: if RCODE is 0 (NOERROR) and we got records, it's open
+      // DNS-over-TCP: 2-byte length prefix before the DNS message.
+      // DNS message layout: [0-1]=txid, [2-3]=flags, [4-5]=QDCOUNT, [6-7]=ANCOUNT
+      // So after the 2-byte TCP length prefix: rcode is in byte 5 (flags-low), ancount at bytes 8-9.
       if (data.length > 14) {
-        const rcode = data[3] & 0x0F; // bits 0-3 of byte 3 (after length prefix)
-        const ancount = data.readUInt16BE(8);
+        const rcode   = data[5] & 0x0F; // bits 0-3 of flags-low byte (offset 5 after TCP length prefix)
+        const ancount = data.readUInt16BE(8); // ANCOUNT at offset 8
         if (rcode === 0 && ancount > 0) {
           done({ vulnerable: true, nameserver, bytesReceived: data.length });
         } else {

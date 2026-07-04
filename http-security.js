@@ -184,8 +184,9 @@ function fetchURL(hostname, opts = {}) {
     path     = '/',
     method   = 'GET',
     headers  = {},
-    timeoutMs = 4000,   // reduced from 8000
-    maxBody  = 16384,   // reduced from 32768
+    body     = null,
+    timeoutMs = 4000,
+    maxBody  = 16384,
   } = opts;
 
   return new Promise((resolve) => {
@@ -197,28 +198,42 @@ function fetchURL(hostname, opts = {}) {
       method,
       headers: { 'User-Agent': 'CipherQ-Scanner/1.0', ...headers },
       rejectUnauthorized: false,
+      // Note: Node's socket timeout only fires on *inactivity* — a server
+      // dripping one byte just under the interval keeps the connection alive
+      // indefinitely. The wallTimer below is the hard upper bound.
       timeout: timeoutMs,
     };
 
     let resolved = false;
     const done = (r) => { if (!resolved) { resolved = true; resolve(r); } };
 
+    // Hard wall-clock timer: fires unconditionally at timeoutMs + 500ms.
+    // Prevents drip-feed / slow-loris stalls that bypass socket.setTimeout.
+    const wallTimer = setTimeout(() => { done(null); }, timeoutMs + 500);
+
     try {
       const req = lib.request(options, (res) => {
-        let body = '';
-        res.on('data', (c) => { body += c; if (body.length > maxBody) res.destroy(); });
-        res.on('end', () => done({
-          statusCode: res.statusCode,
-          headers: res.headers,
-          body: body.slice(0, maxBody),
-          redirectLocation: res.headers.location || null,
-        }));
-        res.on('error', () => done(null));
+        let buf = '';
+        res.on('data', (c) => {
+          buf += c;
+          if (buf.length > maxBody) res.destroy();
+        });
+        res.on('end', () => {
+          clearTimeout(wallTimer);
+          done({
+            statusCode:       res.statusCode,
+            headers:          res.headers,
+            body:             buf.slice(0, maxBody),
+            redirectLocation: res.headers.location || null,
+          });
+        });
+        res.on('error', () => { clearTimeout(wallTimer); done(null); });
       });
-      req.on('error',   () => done(null));
-      req.on('timeout', () => { req.destroy(); done(null); });
+      req.on('error',   () => { clearTimeout(wallTimer); done(null); });
+      req.on('timeout', () => { clearTimeout(wallTimer); req.destroy(); done(null); });
+      if (body) req.write(body);
       req.end();
-    } catch { done(null); }
+    } catch { clearTimeout(wallTimer); done(null); }
   });
 }
 
