@@ -22,24 +22,43 @@ const DATA_DIR = process.env.CBOM_DATA_DIR || path.join(os.tmpdir(), 'cipherq-cb
 // Ensure the data directory exists at startup
 try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch {}
 
-// ─── File helpers ─────────────────────────────────────────────────────────────
+// Every store is namespaced under a tenant directory. Before this fix,
+// storage was keyed purely by domain name — GET /api/cbom/board-metrics/:domain
+// returned whichever tenant's data was on disk for that domain to ANY caller,
+// with no authorisation check at all (a cross-tenant read). 'default' is used
+// when no tenant context is available (e.g. the CLI, or a single-tenant
+// self-hosted deployment where the API-key auth middleware is not enabled) so
+// existing single-tenant usage keeps working unchanged.
+const DEFAULT_TENANT = 'default';
 
-function safeFilename(domain) {
-  // Strip anything that isn't alphanumeric, dot, or hyphen
-  return domain.replace(/[^a-zA-Z0-9.\-]/g, '_').toLowerCase() + '.json';
+function safeSegment(s) {
+  // Strip anything that isn't alphanumeric, dot, or hyphen — used for both
+  // the tenant segment and the domain segment, and rejects path traversal
+  // sequences (a segment of ".." becomes "__" rather than escaping DATA_DIR).
+  return String(s).replace(/[^a-zA-Z0-9.\-]/g, '_').toLowerCase();
 }
 
-function readDomainStore(domain) {
-  const p = path.join(DATA_DIR, safeFilename(domain));
+function tenantDir(tenantId) {
+  const dir = path.join(DATA_DIR, safeSegment(tenantId || DEFAULT_TENANT));
+  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  return dir;
+}
+
+function safeFilename(domain) {
+  return safeSegment(domain) + '.json';
+}
+
+function readDomainStore(domain, tenantId = DEFAULT_TENANT) {
+  const p = path.join(tenantDir(tenantId), safeFilename(domain));
   try {
     return JSON.parse(fs.readFileSync(p, 'utf8'));
   } catch {
-    return { domain, scans: [], vendors: [], findings: [], waivers: [] };
+    return { domain, tenantId, scans: [], vendors: [], findings: [], waivers: [] };
   }
 }
 
-function writeDomainStore(domain, data) {
-  const p    = path.join(DATA_DIR, safeFilename(domain));
+function writeDomainStore(domain, data, tenantId = DEFAULT_TENANT) {
+  const p    = path.join(tenantDir(tenantId), safeFilename(domain));
   const tmp  = p + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
   fs.renameSync(tmp, p);
@@ -48,6 +67,13 @@ function writeDomainStore(domain, data) {
 // ─── Severity scoring weights ─────────────────────────────────────────────────
 
 const SEV_WEIGHT = { critical: 25, high: 15, medium: 5, low: 1, info: 0 };
+
+// QEI methodology version. Bump this whenever computeQEI's weights or inputs
+// change, so a QEI of "42" on an old scan and a QEI of "42" on a new one can
+// be told apart rather than silently compared as if they meant the same
+// thing. Stored alongside every persisted scan record and surfaced in
+// getBoardMetrics.
+const QEI_METHOD_VERSION = 1;
 
 function scoreSeverity(findings = []) {
   return findings.reduce((acc, f) => acc + (SEV_WEIGHT[f.severity] || 0), 0);
@@ -66,6 +92,25 @@ function countBySev(findings = []) {
 // ─── Quantum Exposure Index ───────────────────────────────────────────────────
 // 0 = perfect PQ posture; 100 = maximum exposure
 // Driven by: PQ readiness of reachable hosts, KEX status, cert posture, HNDL risk
+
+// Fallback only: approximates a QEI for scan records persisted before the
+// qei-consolidation fix (F16), which only have the lightweight stored
+// summary fields (not the full scanResult), so it can't use the same
+// computation as computeQEI(). Every scan persisted after this fix stores
+// its QEI directly via computeQEI() at persist time — this function should
+// only ever run against historical data.
+function estimateLegacyQEI(scanRecord) {
+  const pb = scanRecord.pqReadinessBreakdown || {};
+  const total = scanRecord.hostsReachable || 1;
+  let qei = 0;
+  qei += Math.round((pb.none    || 0) / total * 50);
+  qei += Math.round((pb.unknown || 0) / total * 30);
+  qei -= Math.round((pb.ready   || 0) / total * 30);
+  if (scanRecord.overallHndlRisk === 'high') qei += 20;
+  else if (scanRecord.overallHndlRisk === 'high-likely') qei += 15;
+  qei += Math.min(15, (scanRecord.findingsBySeverity?.critical || 0) * 3);
+  return Math.max(0, Math.min(100, qei));
+}
 
 function computeQEI(scanResult, dnsData, httpData, networkData) {
   const { summary, hosts } = scanResult;
@@ -122,8 +167,8 @@ function computeQEI(scanResult, dnsData, httpData, networkData) {
 
 // ─── Public: persistScan ──────────────────────────────────────────────────────
 
-function persistScan(domain, scanResult, dnsData = null, httpData = null, networkData = null) {
-  const store = readDomainStore(domain);
+function persistScan(domain, scanResult, dnsData = null, httpData = null, networkData = null, tenantId = DEFAULT_TENANT) {
+  const store = readDomainStore(domain, tenantId);
 
   // Aggregate all findings for this scan
   const allFindings = [
@@ -132,6 +177,16 @@ function persistScan(domain, scanResult, dnsData = null, httpData = null, networ
     ...(httpData?.findings            || []),
     ...(networkData?.findings         || []),
   ];
+
+  // Compute QEI exactly once, here, from the full scan data (hosts array,
+  // raw findings, dns/http/network reports) while we still have all of it.
+  // getBoardMetrics() used to re-derive its OWN separate approximation from
+  // just the stored summary fields, using different weights entirely
+  // (criticalTLS * 3 vs computeQEI's * 5, and no DNS/SSH terms at all) —
+  // meaning the CBOM Dashboard and the downloaded report could disagree
+  // about the headline number. Storing that one computed value here and
+  // having getBoardMetrics simply read it back closes that gap.
+  const qei = computeQEI(scanResult, dnsData, httpData, networkData);
 
   const scanRecord = {
     id:          `scan_${Date.now()}`,
@@ -143,6 +198,8 @@ function persistScan(domain, scanResult, dnsData = null, httpData = null, networ
     hostsProbed:    scanResult.summary.hostsProbed,
     pqReadinessBreakdown: scanResult.summary.pqReadinessBreakdown,
     overallHndlRisk: scanResult.summary.overallHndlRisk,
+    qei,
+    qeiMethodVersion: QEI_METHOD_VERSION,
   };
 
   store.scans.push(scanRecord);
@@ -176,14 +233,14 @@ function persistScan(domain, scanResult, dnsData = null, httpData = null, networ
     }
   }
 
-  writeDomainStore(domain, store);
+  writeDomainStore(domain, store, tenantId);
   return store;
 }
 
 // ─── Public: getBoardMetrics ──────────────────────────────────────────────────
 
-function getBoardMetrics(domain) {
-  const store = readDomainStore(domain);
+function getBoardMetrics(domain, tenantId = DEFAULT_TENANT) {
+  const store = readDomainStore(domain, tenantId);
 
   if (store.scans.length === 0) {
     // Return a zero-state rather than an error
@@ -202,33 +259,30 @@ function getBoardMetrics(domain) {
   const latestScan = store.scans[store.scans.length - 1];
   const prevScan   = store.scans.length > 1 ? store.scans[store.scans.length - 2] : null;
 
-  // Recompute QEI from the raw summary if available, else estimate from severity counts
-  // (QEI needs the full scanResult; we store a summary so we approximate here)
-  const pb = latestScan.pqReadinessBreakdown || {};
-  const total = latestScan.hostsReachable || 1;
-  const pqNonePct    = (pb.none    || 0) / total;
-  const pqUnknownPct = (pb.unknown || 0) / total;
-  const pqReadyPct   = (pb.ready   || 0) / total;
-
-  let qei = 0;
-  qei += Math.round(pqNonePct    * 50);
-  qei += Math.round(pqUnknownPct * 30);
-  qei -= Math.round(pqReadyPct   * 30);
-  if (latestScan.overallHndlRisk === 'high')          qei += 20;
-  else if (latestScan.overallHndlRisk === 'high-likely') qei += 15;
-  const critTLS = (latestScan.findingsBySeverity?.critical || 0);
-  qei += Math.min(15, critTLS * 3);
-  qei = Math.max(0, Math.min(100, qei));
+  // Read the QEI computed once by persistScan() from the full scan data,
+  // rather than re-deriving a second, differently-weighted approximation
+  // from just the stored summary fields (the previous version of this
+  // function did — see git history / CipherQ_Feature_Review.md F16 for what
+  // that let the CBOM Dashboard and the downloaded report disagree about).
+  // Older scan records persisted before this fix won't have a `qei` field;
+  // fall back to a one-time best-effort estimate for those only, clearly
+  // marked as such via qeiMethodVersion so the discrepancy is visible rather
+  // than silently blended in with properly-computed values.
+  const hasStoredQEI = typeof latestScan.qei === 'number';
+  const qei = hasStoredQEI ? latestScan.qei : estimateLegacyQEI(latestScan);
+  const qeiMethodVersion = hasStoredQEI ? latestScan.qeiMethodVersion : 0;
 
   let qeiTrend = null;
   if (prevScan) {
-    const pbPrev = prevScan.pqReadinessBreakdown || {};
-    const totalPrev = prevScan.hostsReachable || 1;
-    let qeiPrev = Math.round((pbPrev.none || 0) / totalPrev * 50) +
-                  Math.round((pbPrev.unknown || 0) / totalPrev * 30);
-    qeiPrev = Math.max(0, Math.min(100, qeiPrev));
+    const prevHasStored = typeof prevScan.qei === 'number';
+    const qeiPrev = prevHasStored ? prevScan.qei : estimateLegacyQEI(prevScan);
     qeiTrend = qei - qeiPrev;
   }
+
+  // Asset inventory breakdown — independent of QEI, still needs the stored
+  // PQ readiness breakdown and reachable-host total.
+  const pb = latestScan.pqReadinessBreakdown || {};
+  const total = latestScan.hostsReachable || 1;
 
   const openFindings = store.findings.filter(f => f.status === 'open');
   const openBySev    = countBySev(openFindings);
@@ -255,6 +309,7 @@ function getBoardMetrics(domain) {
     totalScans: store.scans.length,
     quantumExposureIndex: qei,
     quantumExposureTrend: qeiTrend,
+    qeiMethodVersion, // 0 = legacy pre-consolidation estimate; see computeQEI/estimateLegacyQEI
     assetInventory: {
       total:          latestScan.hostsProbed    || 0,
       pqNone:         pb.none    || 0,
@@ -277,17 +332,17 @@ function getBoardMetrics(domain) {
 
 // ─── Vendor CBOM helpers ──────────────────────────────────────────────────────
 
-function listVendors() {
+function listVendors(tenantId = DEFAULT_TENANT) {
   try {
-    const vendorFile = path.join(DATA_DIR, '_vendors.json');
+    const vendorFile = path.join(tenantDir(tenantId), '_vendors.json');
     return JSON.parse(fs.readFileSync(vendorFile, 'utf8'));
   } catch {
     return { vendors: [] };
   }
 }
 
-function upsertVendor(vendorRecord) {
-  const vendorFile = path.join(DATA_DIR, '_vendors.json');
+function upsertVendor(vendorRecord, tenantId = DEFAULT_TENANT) {
+  const vendorFile = path.join(tenantDir(tenantId), '_vendors.json');
   const tmp  = vendorFile + '.tmp';
   let data;
   try { data = JSON.parse(fs.readFileSync(vendorFile, 'utf8')); } catch { data = { vendors: [] }; }

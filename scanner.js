@@ -10,7 +10,7 @@
 const tls = require('tls');
 const net = require('net');
 const dns = require('dns').promises;
-const { assertScannable } = require('./ssrf-guard');
+const { assertScannable, checkHostnameLiteral, checkResolvedIPs } = require('./ssrf-guard');
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -28,8 +28,145 @@ const CLASSICAL_KEX_PATTERNS = [
   /ecdhe/i, /dhe/i, /rsa/i, /x25519$/, /p-256/i, /secp256r1/i, /p-384/i
 ];
 
+// ─── Confirmed hybrid PQ KEX detection ───────────────────────────────────────
+// Named TLS 1.3 groups combining a classical ECDH curve with an ML-KEM level,
+// in IANA-registered preference order. IANA TLS Supported Groups registry:
+//   X25519MLKEM768      = 0x11EC (4588) — Recommended: Y
+//   SecP256r1MLKEM768   = 0x11EB (4587)
+//   SecP384r1MLKEM1024  = 0x11ED (4589)
+// Node.js exposes these to `ecdhCurve` (colon-separated, like classical
+// curves) once built against OpenSSL 3.5+ (Node 24+, and some Node 22 builds
+// depending on the linked OpenSSL). This supersedes the PQ_KEX_PATTERNS /
+// CLASSICAL_KEX_PATTERNS regex lists above, which were declared but never
+// consulted anywhere in this file — TLS 1.3 KEX group was previously always
+// hardcoded to "classical-likely" regardless of what the server actually
+// supported (see classifyKex below and probeKexConfirmation).
+const PQ_HYBRID_GROUPS = ['X25519MLKEM768', 'SecP256r1MLKEM768', 'SecP384r1MLKEM1024'];
+
+// Cached once per process: does the local Node/OpenSSL build even recognise
+// these group names? If not, every confirmation probe would throw
+// synchronously and we'd rather find that out once, up front, than on every
+// single host in a scan.
+let _localPQKexSupportCache = null;
+function localRuntimeSupportsPQKex() {
+  if (_localPQKexSupportCache !== null) return _localPQKexSupportCache;
+  try {
+    tls.createSecureContext({ ecdhCurve: PQ_HYBRID_GROUPS.join(':') });
+    _localPQKexSupportCache = true;
+  } catch (e) {
+    _localPQKexSupportCache = false;
+    console.warn(
+      '[CipherQ] Local Node/OpenSSL build does not recognise hybrid PQ KEX groups ' +
+      `(${PQ_HYBRID_GROUPS.join(', ')}). Confirmed PQ-readiness detection is disabled ` +
+      'and all TLS 1.3 hosts will fall back to "requires deep enumeration". ' +
+      'Upgrade to Node.js 24+ (OpenSSL 3.5+) to enable it. ' +
+      `(setECDHCurve error: ${e.message})`
+    );
+  }
+  return _localPQKexSupportCache;
+}
+
+/**
+ * Confirms whether a server's TLS 1.3 endpoint accepts a hybrid post-quantum
+ * KEX group, by offering ONLY that group list and observing whether the
+ * handshake completes. This is conclusive by construction: if the client
+ * offers nothing but X25519MLKEM768/SecP256r1MLKEM768/SecP384r1MLKEM1024 and
+ * the handshake succeeds, the server has no other option — it accepted a
+ * hybrid PQ group. If the server doesn't support any of them, OpenSSL fails
+ * the handshake with a "handshake failure" alert / "no suitable key share"
+ * error, which we can distinguish from a network-level failure
+ * (ECONNREFUSED/ETIMEDOUT/DNS errors) that just means the probe itself
+ * couldn't run.
+ *
+ * We deliberately do NOT attempt to report "preferred vs merely tolerated"
+ * when a server supports both classical and hybrid groups — Node's public
+ * TLS API does not expose the negotiated named group for TLS 1.3
+ * (`getEphemeralKeyInfo()` returns `{}` for a hybrid group, confirmed against
+ * a local OpenSSL 3.5 test server), so there is no reliable way to read back
+ * which group an ordinary handshake actually chose. Claiming otherwise would
+ * repeat the same "confident but unverifiable" pattern this feature replaces.
+ */
+async function probeKexConfirmation(hostname, options = {}) {
+  const { pinnedIP = null, timeoutMs = 5000 } = options;
+
+  if (!localRuntimeSupportsPQKex()) {
+    return { status: 'inconclusive', reason: 'local-runtime-unsupported' };
+  }
+
+  return new Promise((resolve) => {
+    let resolved = false;
+    const done = (result) => { if (!resolved) { resolved = true; resolve(result); } };
+
+    const wallTimer = setTimeout(() => {
+      try { socket?.destroy(); } catch {}
+      done({ status: 'inconclusive', reason: 'timeout' });
+    }, timeoutMs + 500);
+
+    let socket;
+    try {
+      socket = tls.connect({
+        host: pinnedIP || hostname,
+        port: TLS_PORT,
+        servername: hostname,
+        rejectUnauthorized: false,
+        ecdhCurve: PQ_HYBRID_GROUPS.join(':'),
+        minVersion: 'TLSv1.3',
+        maxVersion: 'TLSv1.3',
+      }, () => {
+        clearTimeout(wallTimer);
+        const protocol = socket.getProtocol();
+        const cipher = socket.getCipher();
+        socket.destroy();
+        // Connected while ONLY hybrid groups were offered — conclusive.
+        done({ status: 'confirmed-pq', protocol, cipher });
+      });
+
+      socket.on('error', (e) => {
+        clearTimeout(wallTimer);
+        const msg = (e.message || '').toLowerCase();
+        const isHandshakeRejection =
+          /handshake failure/.test(msg) ||
+          /no suitable key share/.test(msg) ||
+          /no shared cipher/.test(msg) ||
+          /no shared group/.test(msg) ||
+          e.code === 'ERR_SSL_SSL/TLS_ALERT_HANDSHAKE_FAILURE';
+        if (isHandshakeRejection) {
+          done({ status: 'confirmed-classical', detail: e.message });
+        } else {
+          // Network-level failure (ECONNREFUSED, ETIMEDOUT, DNS, reset, etc.)
+          // — the probe itself didn't get far enough to prove anything.
+          done({ status: 'inconclusive', reason: e.code || e.message });
+        }
+      });
+
+      socket.setTimeout(timeoutMs, () => {
+        clearTimeout(wallTimer);
+        socket.destroy();
+        done({ status: 'inconclusive', reason: 'ETIMEDOUT' });
+      });
+    } catch (e) {
+      // Synchronous throw — e.g. a runtime that lied about supporting the
+      // curve name via createSecureContext but fails on tls.connect.
+      clearTimeout(wallTimer);
+      done({ status: 'inconclusive', reason: `sync-throw: ${e.message}` });
+    }
+  });
+}
+
 // Algorithms quantum-safe for symmetric (not threatened by Grover until < 256-bit)
 const SAFE_SYMMETRIC = ['AES_256_GCM', 'AES_256_CCM', 'CHACHA20_POLY1305'];
+
+// 128-bit AEAD suites — Grover's algorithm reduces AES-128 to ~2^64 *sequential*
+// quantum operations, which NIST SP 800-131A and NCSC both treat as adequate
+// for the foreseeable future (it is not an immediate practical threat, unlike
+// classical breaks). CNSA 2.0 mandates AES-256 for National Security Systems
+// specifically, not as a general web/TLS requirement. TLS_AES_128_GCM_SHA256
+// is the single most common TLS 1.3 suite on the public internet — treating it
+// as a "weak symmetric cipher" finding on every host inflates finding counts
+// and Cryptographic Debt without a matching real-world risk. These are only
+// surfaced as an informational note, and only escalated if the caller opts
+// into strict CNSA-2.0 mode.
+const SAFE_SYMMETRIC_128_AEAD = ['AES_128_GCM', 'AES_128_CCM'];
 
 // Certificate signature algorithms that are PQ
 const PQ_SIG_PATTERNS = [/ml-dsa/i, /mldsa/i, /slh-dsa/i, /slhdsa/i, /fn-dsa/i, /fndsa/i, /dilithium/i, /falcon/i, /sphincs/i];
@@ -203,30 +340,52 @@ function sniMatch(hostname, certSubject, certSAN) {
   const cn = certSubject?.CN || '';
   const san = certSAN || '';
 
+  // Normalise: strip a single trailing dot (FQDN form) before comparing.
+  const normHost = (h) => h.toLowerCase().replace(/\.$/, '');
+  const hostLow = normHost(hostname);
+
   // Exact match on CN
-  if (cn.toLowerCase() === hostname.toLowerCase()) return { match: true, detail: `CN matches: ${cn}` };
+  if (normHost(cn) === hostLow) return { match: true, detail: `CN matches: ${cn}` };
 
   // Wildcard match on CN
   if (cn.startsWith('*.')) {
-    const base = cn.slice(2).toLowerCase();
-    const host = hostname.toLowerCase();
-    if (host.endsWith('.' + base) || host === base) return { match: true, detail: `Wildcard CN matches: ${cn}` };
+    const base = normHost(cn.slice(2));
+    if (hostLow.endsWith('.' + base) || hostLow === base) return { match: true, detail: `Wildcard CN matches: ${cn}` };
   }
 
   // SAN match
-  const sans = san.split(',').map(s => s.replace(/^DNS:/, '').trim().toLowerCase());
-  const hostLow = hostname.toLowerCase();
+  // BUGFIX: the previous implementation ran .replace(/^DNS:/, '') before
+  // .trim(). subjectaltname is formatted "DNS:a.com, DNS:b.com, DNS:c.com" —
+  // every entry after the first still has a leading space at that point, so
+  // ^DNS: doesn't match and the "DNS:" prefix survives on all but the first
+  // SAN. That produced false SNI-MISMATCH findings on any host bound via a
+  // SAN other than the cert's first one (the majority of multi-SAN certs).
+  // Trimming first, then stripping the (case-insensitive) DNS: prefix, and
+  // also handling IP: entries fixes this.
+  const sans = san
+    .split(',')
+    .map(s => s.trim())
+    .map(s => {
+      if (/^IP Address:/i.test(s)) return { kind: 'ip', value: s.replace(/^IP Address:/i, '').trim() };
+      return { kind: 'dns', value: normHost(s.replace(/^DNS:/i, '').trim()) };
+    });
+
   for (const s of sans) {
-    if (s === hostLow) return { match: true, detail: `SAN match: ${s}` };
-    if (s.startsWith('*.')) {
-      const base = s.slice(2);
-      if (hostLow.endsWith('.' + base) || hostLow === base) return { match: true, detail: `Wildcard SAN match: ${s}` };
+    if (s.kind !== 'dns') continue;
+    if (s.value === hostLow) return { match: true, detail: `SAN match: ${s.value}` };
+    if (s.value.startsWith('*.')) {
+      const base = s.value.slice(2);
+      if (hostLow.endsWith('.' + base) || hostLow === base) return { match: true, detail: `Wildcard SAN match: ${s.value}` };
     }
+  }
+  // IP-literal SAN match (hostname supplied as a bare IP)
+  for (const s of sans) {
+    if (s.kind === 'ip' && s.value === hostname) return { match: true, detail: `IP SAN match: ${s.value}` };
   }
 
   return {
     match: false,
-    detail: `MISMATCH — hostname: ${hostname}, cert CN: ${cn}, SANs: ${sans.slice(0,3).join(', ')}`
+    detail: `MISMATCH — hostname: ${hostname}, cert CN: ${cn}, SANs: ${sans.slice(0,3).map(s => s.value).join(', ')}`
   };
 }
 
@@ -377,12 +536,12 @@ async function probeDNS(hostname) {
 
 // ─── Legacy TLS Version Probes ────────────────────────────────────────────────
 
-async function probeLegacyTLS(hostname) {
+async function probeLegacyTLS(hostname, pinnedIP = null) {
   const versions = ['TLSv1.3', 'TLSv1.2', 'TLSv1.1', 'TLSv1'];
   // Run all version probes in parallel rather than sequentially
   const probes = await Promise.all(
     versions.map(ver =>
-      probeTLS(hostname, { tlsVersion: ver, timeoutMs: 4000 })
+      probeTLS(hostname, { tlsVersion: ver, timeoutMs: 4000, pinnedIP })
         .then(probe => [ver, {
           supported: probe.reachable && !probe.error,
           cipher: probe.cipher?.name || null,
@@ -405,7 +564,7 @@ function isWeakCipherName(name) {
   return WEAK_CIPHER_MARKERS.some(m => upper.includes(m));
 }
 
-async function probeWeakCiphers(hostname) {
+async function probeWeakCiphers(hostname, pinnedIP = null) {
   const weakCipherSuites = [
     'RC4-SHA', 'RC4-MD5', 'DES-CBC3-SHA', 'DES-CBC-SHA',
     'EXP-RC4-MD5', 'EXP-DES-CBC-SHA', 'NULL-SHA', 'NULL-MD5',
@@ -415,6 +574,7 @@ async function probeWeakCiphers(hostname) {
   const probe = await probeTLS(hostname, {
     ciphers: weakCipherSuites,
     timeoutMs: 5000,
+    pinnedIP,
   });
 
   // A TLS proxy or modern server may accept the connection but negotiate a
@@ -434,10 +594,20 @@ async function probeWeakCiphers(hostname) {
 
 // ─── HSTS Probe (HTTP redirect + header) ─────────────────────────────────────
 
-async function probeHTTPS(hostname) {
+async function probeHTTPS(hostname, pinnedIP = null) {
   return new Promise((resolve) => {
     const http = require('http');
-    const options = { host: hostname, port: 80, path: '/', method: 'HEAD', timeout: 3000 };
+    // Connect to the pinned public IP (closes the DNS-rebinding window —
+    // previously this was the one probe in analyseHost that always
+    // re-resolved the hostname at connect time regardless of the IP pinned
+    // by the initial TLS probe) while still sending the correct Host header
+    // for name-based virtual hosting.
+    const options = {
+      host: pinnedIP || hostname,
+      headers: pinnedIP ? { Host: hostname } : undefined,
+      servername: hostname,
+      port: 80, path: '/', method: 'HEAD', timeout: 3000,
+    };
     const req = http.request(options, (res) => {
       resolve({
         httpReachable: true,
@@ -459,10 +629,58 @@ async function analyseHost(hostname, opts = {}) {
     deepLegacyProbe = true,
     weakCipherProbe = true,
     pinnedIP = null,     // resolved public IP — prevents DNS rebinding at connect time
+    cnsaStrict = false,  // opt-in CNSA 2.0 posture: flags AES-128 as non-compliant (low) instead of informational
   } = opts;
+
+  // ─── SSRF guard ───────────────────────────────────────────────────────────
+  // scanner.js imported assertScannable but never called it anywhere. The
+  // only check in the whole application was on the apex domain in
+  // server.js's /api/scan route — every host actually probed (the ~500-entry
+  // wordlist, plus caller-supplied customHosts and ctHostsFromBrowser, which
+  // reach this function directly) was completely unchecked. A customHosts
+  // entry resolving to 127.0.0.1, 169.254.169.254, or an alternate-form IP
+  // literal like "2130706433" would have been connected to.
+  //
+  // Cheap, no-network string-level check first (catches IP-literal hostnames
+  // and reserved names before any DNS activity):
+  const literalCheck = checkHostnameLiteral(hostname);
+  if (literalCheck.blocked) {
+    return {
+      hostname, timestamp: new Date().toISOString(),
+      dns: null, tls: null,
+      findings: [{
+        id: 'SSRF-BLOCKED', severity: 'info', area: 'scan-safety',
+        title: 'Host blocked by SSRF guard',
+        detail: `Blocked before any network activity: ${literalCheck.reason}`,
+      }],
+      riskScore: 0, pqReadiness: 'not-applicable', hndlRisk: 'not-applicable', tnflRisk: 'not-applicable',
+      _ssrfBlocked: true,
+    };
+  }
 
   // 1. DNS
   const dnsResult = await probeDNS(hostname);
+
+  // Validate the IPs probeDNS actually resolved — reusing its records rather
+  // than re-resolving via assertScannable a second time (avoids doubling DNS
+  // traffic across a several-hundred-host scan, and avoids a TOCTOU window
+  // between two independent resolves of the same name under DNS rebinding).
+  if (!literalCheck.canonicalIP) {
+    const resolvedCheck = checkResolvedIPs([...(dnsResult.aRecords || []), ...(dnsResult.aaaaRecords || [])]);
+    if (resolvedCheck.blocked) {
+      return {
+        hostname, timestamp: new Date().toISOString(),
+        dns: dnsResult, tls: null,
+        findings: [{
+          id: 'SSRF-BLOCKED', severity: 'info', area: 'scan-safety',
+          title: 'Host blocked by SSRF guard',
+          detail: `"${hostname}" ${resolvedCheck.reason} — refusing to probe.`,
+        }],
+        riskScore: 0, pqReadiness: 'not-applicable', hndlRisk: 'not-applicable', tnflRisk: 'not-applicable',
+        _ssrfBlocked: true,
+      };
+    }
+  }
 
   // 2. Skip TLS probe immediately if DNS doesn't resolve.
   //    This is the single biggest performance win: ~70% of wordlist entries are
@@ -486,7 +704,14 @@ async function analyseHost(hostname, opts = {}) {
   }
 
   // 3. Primary TLS probe (connect to pinned IP to prevent DNS-rebinding)
-  const tlsResult = await probeTLS(hostname, { pinnedIP: pinnedIP || dnsResult.aRecords?.[0] || null });
+  // Resolved once, reused by every subsequent probe against this host (legacy
+  // TLS, weak cipher, HTTP, KEX confirmation) so none of them re-resolve the
+  // hostname at their own connect time. Re-resolving per-probe was the
+  // remaining DNS-rebinding window: an attacker who controls the hostname's
+  // DNS could return a public IP for the first probe (passing assertScannable
+  // upstream) and a private IP for a later probe.
+  const effectivePinnedIP = pinnedIP || dnsResult.aRecords?.[0] || null;
+  const tlsResult = await probeTLS(hostname, { pinnedIP: effectivePinnedIP });
 
   const result = {
     hostname,
@@ -611,10 +836,55 @@ async function analyseHost(hostname, opts = {}) {
   }
 
   // KEX analysis
-  const kexAnalysis = classifyKex(cipher?.standardName || cipher?.name, protocol);
+  let kexAnalysis = classifyKex(cipher?.standardName || cipher?.name, protocol);
+
+  // Confirmed hybrid PQ KEX detection (F1). classifyKex() above always
+  // returns 'classical-likely' for TLS 1.3 — that used to be the final
+  // answer. Now, for TLS 1.3 hosts, we run a differential probe that offers
+  // ONLY the hybrid PQ groups and see if the handshake still completes. See
+  // probeKexConfirmation() for why this is conclusive and what it
+  // deliberately does not attempt to claim.
+  if (protocol === 'TLSv1.3') {
+    const confirmation = await probeKexConfirmation(hostname, { pinnedIP: effectivePinnedIP });
+    result.tls.kexConfirmationProbe = confirmation;
+
+    if (confirmation.status === 'confirmed-pq') {
+      kexAnalysis = {
+        type: 'hybrid-pq-confirmed',
+        pqStatus: 'pq-hybrid',
+        label: 'hybrid PQ KEX (X25519MLKEM768 or equivalent) — actively confirmed',
+        confirmedDetail: 'Server accepted a TLS 1.3 handshake restricted to only the hybrid PQ groups (X25519MLKEM768 / SecP256r1MLKEM768 / SecP384r1MLKEM1024) — it had no other option and still connected.',
+      };
+    } else if (confirmation.status === 'confirmed-classical') {
+      kexAnalysis = {
+        type: 'classical-confirmed',
+        pqStatus: 'classical',
+        label: 'Confirmed classical-only KEX (server rejected a handshake restricted to hybrid PQ groups)',
+        tls13Classical: true,
+      };
+    }
+    // 'inconclusive' (probe network failure, or local runtime lacks support):
+    // kexAnalysis stays as classifyKex's 'classical-likely' fallback — same
+    // behaviour as before this feature existed.
+  }
+
   result.tls.kex = kexAnalysis;
 
-  if (kexAnalysis.pqStatus === 'classical') {
+  if (kexAnalysis.pqStatus === 'classical' && kexAnalysis.tls13Classical) {
+    result.findings.push({
+      id: 'KEX-CLASSICAL-CONFIRMED-TLS13',
+      severity: 'high',
+      area: 'tls-kex',
+      title: 'Confirmed: no hybrid post-quantum key exchange available (TLS 1.3)',
+      detail: `Server negotiates TLS 1.3 but rejected a handshake restricted to hybrid PQ groups (X25519MLKEM768/SecP256r1MLKEM768/SecP384r1MLKEM1024). This was actively confirmed, not inferred: only classical key exchange is available. Any session traffic recorded today (Harvest-Now-Decrypt-Later) can be decrypted once a Cryptanalytically-Relevant Quantum Computer exists.`,
+      recommendation: 'Enable X25519MLKEM768 hybrid key exchange (OpenSSL 3.5+, Go 1.24+) and prioritise it in the server\'s group preference list.',
+      priority: 'P1',
+      nistRef: 'SC-8, SC-12, SC-23 | NIST IR 8547 | draft-ietf-tls-ecdhe-mlkem-05',
+    });
+    result.riskScore += 35;
+    result.hndlRisk = 'high';
+    result.pqReadiness = 'none';
+  } else if (kexAnalysis.pqStatus === 'classical') {
     result.findings.push({
       id: 'KEX-CLASSICAL',
       severity: 'high',
@@ -629,27 +899,31 @@ async function analyseHost(hostname, opts = {}) {
     result.hndlRisk = 'high';
     result.pqReadiness = 'none';
   } else if (kexAnalysis.pqStatus === 'classical-likely') {
-    // TLS 1.3 — KEX group not determinable from standard API
+    // TLS 1.3 — active confirmation probe was inconclusive (network failure
+    // on the probe itself, or the local CipherQ runtime's Node/OpenSSL build
+    // doesn't recognise the hybrid group names — see localRuntimeSupportsPQKex).
+    // This is now the fallback path, not the default: most TLS 1.3 hosts will
+    // resolve to a confirmed state above.
     result.findings.push({
       id: 'KEX-PQ-STATUS-UNKNOWN',
       severity: 'medium',
       area: 'tls-kex',
-      title: 'Post-quantum KEX status requires deep enumeration',
-      detail: `Server negotiated TLS 1.3. The TLS 1.3 key exchange group (X25519, P-256, or hybrid PQ X25519MLKEM768) cannot be determined from standard TLS socket API — it requires a deep enumeration tool (testssl.sh, sslyze, or equivalent) that negotiates and reports the supported named groups. Based on mid-2026 industry baseline, classical X25519 without hybrid PQ is the most likely state; hybrid PQ KEX (X25519MLKEM768) requires explicit server-side enablement in OpenSSL 3.5+.`,
-      recommendation: 'Run a deep TLS enumeration (testssl.sh --groups) to confirm KEX group. If X25519MLKEM768 is not listed, enable it and prioritise it.',
-      priority: 'P1',
+      title: 'Post-quantum KEX status could not be actively confirmed',
+      detail: `Server negotiated TLS 1.3, but CipherQ's active confirmation probe (restricting the handshake to hybrid PQ groups) did not complete cleanly — this is usually a transient network condition on the probe itself, or the CipherQ server's own Node/OpenSSL build predates hybrid PQ group support (requires Node 24+ / OpenSSL 3.5+). It does not necessarily mean the target lacks PQ support.`,
+      recommendation: 'Re-run the scan. If this persists across scans, confirm the CipherQ server itself is running Node 24+, or run a deep TLS enumeration (testssl.sh --groups) directly against this host.',
+      priority: 'P2',
       nistRef: 'SC-8, SC-12 | NIST IR 8547 | draft-ietf-tls-ecdhe-mlkem-05',
     });
     result.riskScore += 20;
-    result.hndlRisk = 'high-likely'; // most probable state for 2026 infrastructure
+    result.hndlRisk = 'high-likely';
     result.pqReadiness = 'unknown';
   } else if (kexAnalysis.pqStatus === 'pq-hybrid' || kexAnalysis.pqStatus === 'pq') {
     result.findings.push({
-      id: 'KEX-PQ-DETECTED',
+      id: 'KEX-PQ-CONFIRMED',
       severity: 'info',
       area: 'tls-kex',
-      title: 'Post-quantum or hybrid PQ key exchange detected',
-      detail: `Server negotiated ${kexAnalysis.label}. Session key exchange is quantum-resistant. HNDL risk on key exchange is mitigated.`,
+      title: 'Confirmed: hybrid post-quantum key exchange in use',
+      detail: `${kexAnalysis.confirmedDetail || `Server negotiated ${kexAnalysis.label}.`} Session key exchange is quantum-resistant. HNDL risk on key exchange is mitigated.`,
     });
     result.riskScore += 0;
     result.hndlRisk = 'mitigated';
@@ -658,15 +932,44 @@ async function analyseHost(hostname, opts = {}) {
 
   // Symmetric cipher
   const cipherName = cipher?.standardName || cipher?.name || '';
-  const symmetricOk = SAFE_SYMMETRIC.some(s => cipherName.includes(s));
-  if (!symmetricOk && cipherName) {
+  const symmetric256Ok = SAFE_SYMMETRIC.some(s => cipherName.includes(s));
+  const symmetric128AEAD = SAFE_SYMMETRIC_128_AEAD.some(s => cipherName.includes(s));
+
+  if (!symmetric256Ok && symmetric128AEAD && cipherName) {
+    // AES-128-GCM/CCM: practically safe today, not CNSA-2.0. Informational by
+    // default; only a real finding under strict CNSA-2.0 posture.
+    if (cnsaStrict) {
+      result.findings.push({
+        id: 'CIPHER-128BIT-NOT-CNSA2',
+        severity: 'low',
+        area: 'tls-cipher',
+        title: `128-bit symmetric cipher in use: ${cipherName} (not CNSA 2.0 compliant)`,
+        detail: 'CNSA 2.0 requires AES-256 for National Security Systems. 128-bit AEAD ciphers remain practically safe against Grover\'s algorithm for general commercial use but do not meet the CNSA 2.0 bar selected for this scan.',
+        recommendation: 'Prefer AES-256-GCM or ChaCha20-Poly1305 where CNSA 2.0 compliance is required.',
+      });
+      result.riskScore += 3;
+    } else {
+      result.findings.push({
+        id: 'CIPHER-128BIT-INFO',
+        severity: 'info',
+        area: 'tls-cipher',
+        title: `128-bit AEAD symmetric cipher in use: ${cipherName}`,
+        detail: '128-bit AES-GCM/CCM is considered adequate by NIST and NCSC for general use; AES-256-GCM or ChaCha20-Poly1305 offer a larger security margin against Grover\'s algorithm but are not required.',
+        recommendation: 'No action required for general use. Prefer AES-256-GCM if CNSA 2.0 compliance is in scope.',
+      });
+    }
+  } else if (!symmetric256Ok && !symmetric128AEAD && cipherName) {
+    // Genuinely non-AEAD or otherwise unrecognised symmetric construction
+    // (e.g. CBC-mode suites) — real, non-quantum weaknesses apply (padding
+    // oracle attacks, no integrity binding without a separate MAC construction
+    // verified correctly), so this stays a real medium finding.
     result.findings.push({
       id: 'CIPHER-WEAK-SYMMETRIC',
       severity: 'medium',
       area: 'tls-cipher',
       title: `Symmetric cipher may be insufficient: ${cipherName}`,
-      detail: 'AES-256-GCM, AES-256-CCM, or ChaCha20-Poly1305 are recommended. 128-bit key ciphers may be reduced to ~64-bit effective security under Grover\'s algorithm, though this is not an immediate practical threat.',
-      recommendation: 'Prefer AES-256-GCM or ChaCha20-Poly1305 cipher suites.',
+      detail: 'AES-256-GCM, AES-256-CCM, AES-128-GCM/CCM, or ChaCha20-Poly1305 (AEAD constructions) are recommended. Non-AEAD constructions (e.g. CBC-mode) carry real classical weaknesses independent of the quantum threat.',
+      recommendation: 'Move to an AEAD cipher suite: AES-GCM, AES-CCM, or ChaCha20-Poly1305.',
     });
     result.riskScore += 10;
   }
@@ -759,7 +1062,7 @@ async function analyseHost(hostname, opts = {}) {
 
   // Legacy TLS probe (optional, takes extra time)
   if (deepLegacyProbe) {
-    const legacyResults = await probeLegacyTLS(hostname);
+    const legacyResults = await probeLegacyTLS(hostname, effectivePinnedIP);
     result.tls.legacyVersionSupport = legacyResults;
 
     for (const [ver, res] of Object.entries(legacyResults)) {
@@ -780,7 +1083,7 @@ async function analyseHost(hostname, opts = {}) {
 
   // Weak cipher probe
   if (weakCipherProbe) {
-    const weakResult = await probeWeakCiphers(hostname);
+    const weakResult = await probeWeakCiphers(hostname, effectivePinnedIP);
     result.tls.weakCipherTest = weakResult;
     if (weakResult.weakCipherAccepted) {
       result.findings.push({
@@ -797,7 +1100,7 @@ async function analyseHost(hostname, opts = {}) {
   }
 
   // HTTP HSTS check
-  const httpResult = await probeHTTPS(hostname);
+  const httpResult = await probeHTTPS(hostname, effectivePinnedIP);
   result.tls.httpReachable = httpResult.httpReachable;
   if (httpResult.httpReachable && !httpResult.redirectsToHTTPS) {
     result.findings.push({
@@ -1026,6 +1329,7 @@ async function scanDomain(domain, opts = {}) {
     weakCipherProbe = true,
     onProgress = null,
     useCTLog = false,  // server-side CT disabled; browser handles it
+    cnsaStrict = false,
   } = opts;
 
   let hosts;
@@ -1066,7 +1370,7 @@ async function scanDomain(domain, opts = {}) {
   // hosts bail out in <50ms; this 12s ceiling covers the long tail.
   const analyseWithTimeout = (host) =>
     Promise.race([
-      analyseHost(host, { deepLegacyProbe, weakCipherProbe }),
+      analyseHost(host, { deepLegacyProbe, weakCipherProbe, cnsaStrict }),
       new Promise(resolve => setTimeout(() => resolve({
         hostname: host,
         timestamp: new Date().toISOString(),

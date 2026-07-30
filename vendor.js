@@ -195,7 +195,7 @@ async function runAssessment(job) {
       scorecard,
     };
 
-    // Persist to vendor CBOM
+    // Persist to vendor CBOM (tenant-scoped — see cbom.js)
     upsertVendor({
       name:           vendorName,
       domain,
@@ -203,7 +203,7 @@ async function runAssessment(job) {
       overallScore:   scorecard.overallScore,
       categoryScores: scorecard.categoryScores,
       lastAssessedAt: result.vendor.assessedAt,
-    });
+    }, job.tenantId);
 
     job.status = 'complete';
     job.result = result;
@@ -216,13 +216,14 @@ async function runAssessment(job) {
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-function startVendorAssessment(vendorName, domain, includeNetworkScan = false) {
+function startVendorAssessment(vendorName, domain, includeNetworkScan = false, tenantId = 'default') {
   const jobId = generateJobId();
   const job = {
     id:       jobId,
     vendorName,
     domain,
     includeNetworkScan,
+    tenantId,
     status:   'running',
     started:  new Date().toISOString(),
     progress: { message: 'Starting…' },

@@ -1,6 +1,6 @@
 {
   "name": "cipherq-pqc-scanner",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Full-spectrum PQC domain scanner — TLS, DNS, HTTP, network, vendor, CBOM",
   "main": "scanner.js",
   "scripts": {

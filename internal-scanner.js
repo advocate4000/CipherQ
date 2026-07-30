@@ -15,10 +15,11 @@
  * the customer's checkout path.
  */
 
-const fs   = require('fs');
-const path = require('path');
-const tls  = require('tls');
-const net  = require('net');
+const fs     = require('fs');
+const path   = require('path');
+const tls    = require('tls');
+const net    = require('net');
+const crypto = require('crypto');
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -165,6 +166,23 @@ const CODE_RULES = [
 // ─── Certificate file extensions ──────────────────────────────────────────────
 const CERT_EXTENSIONS = new Set(['.pem', '.crt', '.cer', '.der', '.p12', '.pfx', '.p7b', '.jks']);
 
+// Rule areas whose matched line is potentially live secret material (private
+// keys, embedded certs). These findings must NEVER return the raw matched
+// text over the API — the endpoint that serves this JSON is reachable
+// without authentication in the current deployment, and the CODE_RULES
+// below are specifically designed to match -----BEGIN ... PRIVATE KEY-----
+// blocks. Returning a 200-character snippet of a match was, in effect, a
+// secret-disclosure oracle. We keep the file path and line number (the
+// operator has their own filesystem access to go look) and replace the
+// snippet with a hash so duplicate/changed-secret detection still works
+// without ever putting the secret itself on the wire.
+const REDACT_SNIPPET_AREAS = new Set(['sca-secrets']);
+
+function redactedSnippet(line) {
+  const hash = crypto.createHash('sha256').update(line).digest('hex').slice(0, 16);
+  return `[redacted — matched line hash ${hash}, ${line.length} chars]`;
+}
+
 // ─── File walker ──────────────────────────────────────────────────────────────
 
 function walkDir(rootPath, extensions, maxFiles) {
@@ -230,6 +248,7 @@ async function runCodeScan(rootPath, domain) {
           if (trimmed.startsWith('//') || trimmed.startsWith('#') || trimmed.startsWith('*')) {
             continue;
           }
+          const rawLine = lines[i].trim();
           findings.push({
             id:             rule.id,
             severity:       rule.severity,
@@ -237,7 +256,7 @@ async function runCodeScan(rootPath, domain) {
             name:           rule.title,
             file:           relPath,
             line:           i + 1,
-            snippet:        lines[i].trim().slice(0, 200),
+            snippet:        REDACT_SNIPPET_AREAS.has(rule.area) ? redactedSnippet(rawLine) : rawLine.slice(0, 200),
             detail:         rule.detail,
             recommendation: rule.recommendation,
             nistRef:        rule.nistRef,
