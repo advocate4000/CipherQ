@@ -211,7 +211,8 @@ function requireApiKey(req, res, next) {
   if (AUTH_DISABLED) { req.tenantId = 'default'; return next(); }
 
   const header = req.get('x-cipherq-api-key') ||
-    (req.get('authorization') || '').replace(/^Bearer\s+/i, '') || null;
+    (req.get('authorization') || '').replace(/^Bearer\s+/i, '') ||
+    (req.method === 'GET' && req.query.key ? req.query.key : null) || null;
 
   if (!header) {
     return res.status(401).json({ error: 'Missing API key. Send it as X-CipherQ-Api-Key or Authorization: Bearer <key>.' });
@@ -225,6 +226,14 @@ function requireApiKey(req, res, next) {
 }
 
 app.use(express.json({ limit: '4mb' }));
+
+// ─── GET /api/client-config — public; returns the key the frontend should send ─
+// Safe to expose: it's the same key the caller will have to send on every request.
+// Set CIPHERQ_FRONTEND_API_KEY in Render env vars to the same value as one of
+// your CIPHERQ_API_KEYS entries.
+app.get('/api/client-config', (req, res) => {
+  res.json({ apiKey: process.env.CIPHERQ_FRONTEND_API_KEY || '' });
+});
 
 // ─── Static files ─────────────────────────────────────────────────────────────
 
