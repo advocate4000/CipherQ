@@ -375,7 +375,7 @@ app.get('/api/scan/:jobId/stream', requireApiKey, (req, res) => {
         lastCompleted = completed;
         send({ status: 'running', progress: job.progress });
       } else {
-        try { res.write(': heartbeat\n\n'); } catch {}
+        try { res.write('data: {"type":"heartbeat"}\n\n'); } catch {}
       }
     }
 
