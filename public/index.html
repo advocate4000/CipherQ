@@ -887,6 +887,78 @@
     .scan-form { grid-template-columns: 1fr; }
     input[type="text"] { border-right: 1px solid var(--accent-dim) !important; }
   }
+
+  /* ── Status Ticker ── */
+  .status-ticker {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    padding: 6px 24px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    color: var(--text2);
+    letter-spacing: 0.08em;
+    margin: 0 -24px;
+    overflow-x: auto;
+    flex-shrink: 0;
+  }
+  .ticker-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 16px;
+    border-right: 1px solid var(--border);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .ticker-item:last-child { border-right: none; }
+  .ticker-label { text-transform: uppercase; font-weight: 400; }
+  .ticker-value { color: var(--accent); font-weight: 700; }
+  .ticker-value.danger { color: var(--danger); }
+  .ticker-value.warn   { color: var(--warn); }
+  .ticker-value.ok     { color: var(--ok); }
+
+  /* ── Data Sensitivity Bar ── */
+  .sensitivity-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 14px;
+    flex-wrap: wrap;
+  }
+  .sensitivity-label {
+    font-size: 0.58rem;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    color: var(--text2);
+    flex-shrink: 0;
+    margin-right: 2px;
+  }
+  .sensitivity-btn {
+    padding: 3px 11px;
+    font-size: 0.6rem;
+    font-family: var(--font-mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text2);
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .sensitivity-btn.active {
+    border-color: var(--amber);
+    color: var(--amber);
+    background: var(--amber-pale);
+    box-shadow: 0 0 8px rgba(240,154,24,0.25);
+  }
+  .sensitivity-btn:hover:not(.active) {
+    border-color: var(--accent-dim);
+    color: var(--accent);
+  }
 </style>
 </head>
 <body>
@@ -906,6 +978,17 @@
       <span>ENGINE ONLINE · NIST FIPS 203/204</span>
     </div>
   </header>
+
+
+  <!-- Status Ticker -->
+  <div class="status-ticker">
+    <div class="ticker-item"><span class="ticker-label">Last Scan</span><span class="ticker-value" id="tick-last">—</span></div>
+    <div class="ticker-item"><span class="ticker-label">Findings</span><span class="ticker-value" id="tick-findings">—</span></div>
+    <div class="ticker-item"><span class="ticker-label">PQ Ready</span><span class="ticker-value" id="tick-pq">—</span></div>
+    <div class="ticker-item"><span class="ticker-label">HNDL Risk</span><span class="ticker-value" id="tick-hndl">—</span></div>
+    <div class="ticker-item"><span class="ticker-label">QEI</span><span class="ticker-value" id="tick-qei">—</span></div>
+    <div class="ticker-item"><span class="ticker-label">Completed</span><span class="ticker-value" id="tick-completed">—</span></div>
+  </div>
 
   <!-- Scan Panel -->
   <div class="scan-panel">
@@ -936,7 +1019,18 @@
       <label class="check-label">
         <input type="checkbox" id="opt-log"> Show scan log
       </label>
+            <label class="check-label">
+        <input type="checkbox" id="opt-kex"> KEX group negotiation probe
+      </label>
     </div>
+    <div class="sensitivity-bar">
+      <span class="sensitivity-label">Data Sensitivity:</span>
+      <button class="sensitivity-btn active" data-profile="general"    onclick="setSensitivity(this)">General</button>
+      <button class="sensitivity-btn"        data-profile="financial"  onclick="setSensitivity(this)">Financial</button>
+      <button class="sensitivity-btn"        data-profile="healthcare" onclick="setSensitivity(this)">Healthcare</button>
+      <button class="sensitivity-btn"        data-profile="legal"      onclick="setSensitivity(this)">Legal</button>
+      <button class="sensitivity-btn"        data-profile="government" onclick="setSensitivity(this)">Government/NSS</button>
+      <button class="sensitivity-btn"        data-profile="critical"   onclick="setSensitivity(this)">Critical Infrastructure</button>
     <div class="progress-bar" id="progress-bar">
       <div class="progress-fill" id="progress-fill" style="width:0%"></div>
     </div>
@@ -1145,6 +1239,74 @@
 
 
 <script>
+
+// ─── Data sensitivity profiles ────────────────────────────────────────────────
+const SENSITIVITY_PROFILES = {
+  general:    { label: 'General',                 crqcYear: 2031, retentionYears: 5,  riskMultiplier: 1.0 },
+  financial:  { label: 'Financial',               crqcYear: 2029, retentionYears: 10, riskMultiplier: 1.3 },
+  healthcare: { label: 'Healthcare',              crqcYear: 2029, retentionYears: 15, riskMultiplier: 1.4 },
+  legal:      { label: 'Legal',                   crqcYear: 2030, retentionYears: 20, riskMultiplier: 1.3 },
+  government: { label: 'Government/NSS',          crqcYear: 2027, retentionYears: 25, riskMultiplier: 1.6 },
+  critical:   { label: 'Critical Infrastructure', crqcYear: 2028, retentionYears: 30, riskMultiplier: 1.5 },
+};
+let currentSensitivity = 'general';
+
+function setSensitivity(btn) {
+  document.querySelectorAll('.sensitivity-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentSensitivity = btn.dataset.profile;
+}
+
+// ─── Status ticker update ─────────────────────────────────────────────────────
+function updateTicker(result) {
+  if (!result?.summary) return;
+  const s = result.summary;
+  const profile = SENSITIVITY_PROFILES[currentSensitivity] || SENSITIVITY_PROFILES.general;
+
+  const elLast = document.getElementById('tick-last');
+  const elFind = document.getElementById('tick-findings');
+  const elPQ   = document.getElementById('tick-pq');
+  const elHNDL = document.getElementById('tick-hndl');
+  const elQEI  = document.getElementById('tick-qei');
+  const elComp = document.getElementById('tick-completed');
+
+  if (elLast) elLast.textContent = s.domain || '—';
+
+  const totalF = s.findingsTotal ?? (s.findings?.length ?? '—');
+  if (elFind) {
+    elFind.textContent = totalF;
+    elFind.className = 'ticker-value' + (totalF > 0 ? ' warn' : ' ok');
+  }
+
+  const pqReady = s.pqReadinessBreakdown?.ready ?? 0;
+  const reachable = s.hostsReachable ?? 0;
+  if (elPQ) {
+    elPQ.textContent = `${pqReady} / ${reachable}`;
+    elPQ.className = 'ticker-value' + (pqReady > 0 ? ' ok' : ' danger');
+  }
+
+  if (elHNDL) {
+    const risk = (s.overallHndlRisk || '—').toUpperCase().replace('-', ' ');
+    elHNDL.textContent = risk;
+    elHNDL.className = 'ticker-value' + (risk.startsWith('HIGH') ? ' danger' : risk === 'PARTIAL' ? ' warn' : ' ok');
+  }
+
+  // QEI: estimated from risk scores if not directly available
+  if (elQEI) {
+    const hosts = result.hosts || [];
+    const riskScores = hosts.filter(h => h.riskScore != null).map(h => h.riskScore);
+    const qei = riskScores.length > 0
+      ? Math.round(riskScores.reduce((a, b) => a + b, 0) / riskScores.length * profile.riskMultiplier)
+      : '—';
+    elQEI.textContent = qei;
+    if (typeof qei === 'number') {
+      elQEI.className = 'ticker-value' + (qei >= 60 ? ' danger' : qei >= 35 ? ' warn' : ' ok');
+    }
+  }
+
+  if (elComp) elComp.textContent = new Date().toTimeString().slice(0, 8);
+}
+
 let currentJobId = null;
 let pollTimer = null;
 let scanData = null;
@@ -1440,6 +1602,8 @@ async function runServerScan(domain, customHosts, fill, label) {
       customHosts: customHosts.length > 0 ? customHosts : ctHosts,
       deepLegacy: document.getElementById('opt-legacy').checked,
       weakCipher: document.getElementById('opt-weak').checked,
+      kexProbe: document.getElementById('opt-kex').checked,
+      sensitivity: currentSensitivity,
       ctHostsFromBrowser: ctHosts,  // server merges these with wordlist
     })
   });
@@ -1481,6 +1645,7 @@ async function runServerScan(domain, customHosts, fill, label) {
         evtSource.close();
         fill.style.width = '100%';
         if (msg.result?.summary) msg.result.summary.ctLog = ctMeta;
+        updateTicker(msg.result);
         renderResults(msg.result);
         resolve();
       }
@@ -2251,550 +2416,4 @@ function renderCBOMDashboard(m) {
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:24px">
       <div style="background:var(--surface);border:1px solid ${qeiColour};border-radius:10px;padding:24px;text-align:center">
         <div style="font-size:0.55rem;letter-spacing:0.28em;color:var(--text2);font-weight:400;margin-bottom:10px">QUANTUM EXPOSURE INDEX</div>
-        <div style="font-size:3rem;font-weight:800;color:${qeiColour};font-family:var(--font-mono);line-height:1">${m.quantumExposureIndex}</div>
-        <div style="font-size:0.7rem;color:${qeiColour};font-weight:700;margin-top:8px;letter-spacing:0.1em">${qeiLabel}</div>
-        ${trend !== null && trend !== undefined ? `<div style="font-size:0.65rem;color:var(--text2);margin-top:8px">${trend > 0 ? '▲' : trend < 0 ? '▼' : '—'} ${Math.abs(trend)} vs previous scan</div>` : ''}
-      </div>
-      <div style="background:var(--surface);border:1px solid var(--border-hi);border-radius:10px;padding:24px;text-align:center">
-        <div style="font-size:0.55rem;letter-spacing:0.28em;color:var(--text2);font-weight:400;margin-bottom:10px">CRYPTOGRAPHIC DEBT</div>
-        <div style="font-size:3rem;font-weight:800;color:var(--text);font-family:var(--font-mono);line-height:1">${m.cryptographicDebt.openFindings}</div>
-        <div style="font-size:0.7rem;color:var(--text2);margin-top:8px">~${m.cryptographicDebt.estimatedEffortDays} engineer-days to remediate</div>
-      </div>
-    </div>
-
-    <div class="summary-grid" style="margin-bottom:24px">
-      <div class="stat-card"><div class="stat-label">Total Assets</div><div class="stat-value">${m.assetInventory.total}</div></div>
-      <div class="stat-card"><div class="stat-label">PQ None</div><div class="stat-value" style="color:var(--danger)">${m.assetInventory.pqNone}</div></div>
-      <div class="stat-card"><div class="stat-label">PQ Unknown</div><div class="stat-value" style="color:var(--warn)">${m.assetInventory.pqUnknown}</div></div>
-      <div class="stat-card"><div class="stat-label">PQ Ready</div><div class="stat-value" style="color:var(--ok)">${m.assetInventory.pqReady}</div></div>
-      <div class="stat-card"><div class="stat-label">PQ Ready %</div><div class="stat-value" style="color:var(--ok)">${m.assetInventory.pqReadyPercent}%</div></div>
-      <div class="stat-card"><div class="stat-label">Active Waivers</div><div class="stat-value">${m.riskRegister.activeWaivers}</div></div>
-    </div>
-
-    <div class="host-table-card">
-      <div class="section-header"><h3>Open Findings by Severity</h3></div>
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:16px">
-        <div style="text-align:center;padding:10px;border-radius:6px;background:var(--danger-dim)"><div style="font-size:1.7rem;font-weight:800;color:var(--danger);font-family:var(--font-mono)">${m.findingsOpen.critical}</div><div style="font-size:0.6rem;color:var(--danger);text-transform:uppercase;letter-spacing:0.1em">Critical</div></div>
-        <div style="text-align:center;padding:10px;border-radius:6px;background:var(--warn-dim)"><div style="font-size:1.7rem;font-weight:800;color:var(--warn);font-family:var(--font-mono)">${m.findingsOpen.high}</div><div style="font-size:0.6rem;color:var(--warn);text-transform:uppercase;letter-spacing:0.1em">High</div></div>
-        <div style="text-align:center;padding:10px;border-radius:6px;background:var(--info-dim)"><div style="font-size:1.7rem;font-weight:800;color:var(--info);font-family:var(--font-mono)">${m.findingsOpen.medium}</div><div style="font-size:0.6rem;color:var(--info);text-transform:uppercase;letter-spacing:0.1em">Medium</div></div>
-        <div style="text-align:center;padding:10px;border-radius:6px;background:var(--ok-dim)"><div style="font-size:1.7rem;font-weight:800;color:var(--ok);font-family:var(--font-mono)">${m.findingsOpen.low}</div><div style="font-size:0.6rem;color:var(--ok);text-transform:uppercase;letter-spacing:0.1em">Low</div></div>
-      </div>
-    </div>
-
-    <div style="margin-top:12px;padding:12px 16px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;font-size:0.7rem;color:var(--text2)">
-      ${m.riskRegister.upcomingReviews30d > 0
-        ? `⚠ ${m.riskRegister.upcomingReviews30d} risk register review(s) due within 30 days.`
-        : 'No risk register reviews due in the next 30 days.'}
-    </div>
-  `;
-}
-
-// ─── Internal Discovery (Code/SCA + PKI) ──────────────────────────────────────
-async function runInternalScan(type) {
-  const rootPath = document.getElementById('internal-path-input').value.trim();
-  const domain = document.getElementById('internal-label-input').value.trim() || (scanData?.summary?.domain) || 'internal-project';
-  const statusEl = document.getElementById('internal-scan-status');
-  const resultsEl = document.getElementById('internal-scan-results');
-
-  if (!rootPath) { alert('Please enter a filesystem path to scan.'); return; }
-
-  statusEl.textContent = `Running ${type === 'code' ? 'code/SCA' : 'PKI'} scan on ${rootPath}…`;
-  statusEl.style.color = 'var(--accent)';
-  resultsEl.innerHTML = '';
-
-  try {
-    const endpoint = type === 'code' ? '/api/internal/code-scan' : '/api/internal/pki-scan';
-    const resp = await fetch(endpoint, {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ rootPath, domain }),
-    });
-    const data = await resp.json();
-
-    if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-
-    if (type === 'code') {
-      window.lastCodeScanData = data;
-      statusEl.textContent = `✓ Scanned ${data.filesScanned} files — ${data.findings.length} finding(s)`;
-      statusEl.style.color = 'var(--ok)';
-      renderInternalFindings(resultsEl, data.findings.map(f => ({
-        severity: f.severity, title: f.name, hostname: `${f.file}${f.line ? ':'+f.line : ''}`,
-        detail: f.detail, recommendation: f.recommendation, nistRef: f.nistRef,
-      })), 'Code / SCA');
-    } else {
-      window.lastPkiScanData = data;
-      statusEl.textContent = `✓ Found ${data.certificatesParsed} certificate(s) — ${data.findings.length} finding(s)`;
-      statusEl.style.color = 'var(--ok)';
-      renderInternalFindings(resultsEl, data.findings.map(f => ({
-        severity: f.severity, title: f.title, hostname: f.file || '',
-        detail: f.detail, recommendation: f.recommendation, nistRef: f.nistRef,
-      })), 'Internal PKI');
-    }
-  } catch (e) {
-    statusEl.textContent = `Error: ${e.message}`;
-    statusEl.style.color = 'var(--danger)';
-  }
-}
-
-function renderInternalFindings(container, findings, label) {
-  if (findings.length === 0) {
-    container.innerHTML = `<div class="empty-state"><div class="icon">◈</div><p>No ${label} findings.</p></div>`;
-    return;
-  }
-  const sevOrder = ['critical','high','medium','low','info'];
-  const sorted = [...findings].sort((a,b) => sevOrder.indexOf(a.severity) - sevOrder.indexOf(b.severity));
-
-  container.innerHTML = `
-    <div class="findings-section">
-      <div class="section-header"><h3>${label} Findings</h3><span class="count-badge">${sorted.filter(f=>f.severity!=='info').length}</span></div>
-      ${sorted.map((f,i) => `
-        <div class="finding-item" onclick="toggleFinding('int${i}')">
-          <div class="finding-host">${f.hostname}</div>
-          <div class="finding-header"><span class="sev-badge sev-${f.severity}">${f.severity}</span><span class="finding-title">${f.title}</span></div>
-          <div class="finding-detail" id="int${i}">
-            <p>${f.detail}</p>
-            ${f.recommendation ? `<div class="finding-rec">→ ${f.recommendation}</div>` : ''}
-            ${f.nistRef ? `<div class="finding-nist">NIST: ${f.nistRef}</div>` : ''}
-          </div>
-        </div>`).join('')}
-    </div>`;
-}
-
-// ─── Vendor Scorecard ──────────────────────────────────────────────────────────
-let currentVendorResult = null;
-
-async function runVendorAssessment() {
-  const vendorName = document.getElementById('vendor-name-input').value.trim();
-  const domain = document.getElementById('vendor-domain-input').value.trim().replace(/^https?:\/\//i,'').replace(/\/.*$/,'');
-  const includeNetwork = document.getElementById('vendor-network-scan').checked;
-
-  if (!vendorName || !domain) { alert('Please enter both a vendor name and domain.'); return; }
-
-  const btn = document.getElementById('vendor-assess-btn');
-  const bar = document.getElementById('vendor-progress-bar');
-  const fill = document.getElementById('vendor-progress-fill');
-  const label = document.getElementById('vendor-progress-label');
-
-  btn.disabled = true;
-  btn.textContent = '⏳ Assessing…';
-  bar.classList.add('visible');
-  label.classList.add('visible');
-  fill.style.width = '10%';
-  label.textContent = 'Starting vendor assessment…';
-
-  try {
-    const resp = await fetch('/api/vendor/assess', {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ vendorName, domain, includeNetworkScan: includeNetwork }),
-    });
-    const { jobId } = await resp.json();
-
-    let pct = 10;
-    while (true) {
-      await new Promise(r => setTimeout(r, 2000));
-      const poll = await fetch(`/api/vendor/assess/${jobId}`).then(r => r.json());
-
-      if (poll.progress?.message) label.textContent = poll.progress.message;
-      pct = Math.min(pct + 8, 90);
-      fill.style.width = `${pct}%`;
-
-      if (poll.status === 'complete') {
-        fill.style.width = '100%';
-        currentVendorResult = poll.result;
-        renderVendorScorecard(poll.result);
-        loadVendorHistory();
-        break;
-      }
-      if (poll.status === 'error') throw new Error(poll.error);
-    }
-  } catch (e) {
-    label.textContent = `Error: ${e.message}`;
-    label.style.color = 'var(--danger)';
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<span>▶</span> Assess Vendor';
-  }
-}
-
-function renderVendorScorecard(result) {
-  const { vendor, scorecard } = result;
-  const container = document.getElementById('vendor-results-content');
-  const gradeColours = { A:'var(--ok)', B:'var(--ok)', C:'var(--warn)', D:'var(--danger)', F:'var(--danger)' };
-  const gradeColour = gradeColours[scorecard.grade] || 'var(--info)';
-
-  const catLabels = { pqReadiness:'PQ / TLS Readiness', emailSecurity:'Email Security', webSecurity:'Web Security', networkExposure:'Network Exposure', certHygiene:'Cert Hygiene' };
-
-  container.innerHTML = `
-    <div style="display:grid;grid-template-columns:200px 1fr;gap:16px;margin:20px 0">
-      <div style="background:var(--surface);border:1px solid ${gradeColour};border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px">
-        <div style="font-size:3.5rem;font-weight:800;color:${gradeColour};font-family:var(--font-mono);line-height:1">${scorecard.grade}</div>
-        <div style="font-size:0.75rem;color:var(--text2);margin-top:8px">${scorecard.overallScore} / 100</div>
-      </div>
-      <div class="host-table-card">
-        <div class="section-header"><h3>${vendor.name} — Category Breakdown</h3></div>
-        <div style="padding:14px 16px">
-          ${Object.entries(scorecard.categoryScores).map(([cat,score]) => {
-            const grade = scorecard.categoryGrades[cat];
-            const col = gradeColours[grade] || 'var(--info)';
-            return `<div class="ca-bar-row" style="margin-bottom:8px">
-              <div class="ca-name">${catLabels[cat]||cat}</div>
-              <div class="ca-bar-track"><div class="ca-bar-fill" style="width:${score}%;background:${col}"></div></div>
-              <div class="ca-count" style="color:${col};font-weight:700">${grade}</div>
-            </div>`;
-          }).join('')}
-        </div>
-      </div>
-    </div>
-
-    <div class="findings-section">
-      <div class="section-header"><h3>Top Concerns</h3><span class="count-badge">${scorecard.topConcerns.length}</span></div>
-      ${scorecard.topConcerns.length === 0
-        ? '<div class="empty-state"><div class="icon">◈</div><p>No critical or high-severity findings.</p></div>'
-        : scorecard.topConcerns.map(c => `
-          <div class="finding-item">
-            <div class="finding-host">${c.hostname||''}</div>
-            <div class="finding-header"><span class="sev-badge sev-${c.severity}">${c.severity}</span><span class="finding-title">${c.title}</span></div>
-          </div>`).join('')}
-    </div>
-  `;
-}
-
-async function loadVendorHistory() {
-  try {
-    const { vendors } = await fetch('/api/vendor').then(r => r.json());
-    const tbody = document.getElementById('vendor-history-tbody');
-    tbody.innerHTML = vendors.map(v => `
-      <tr>
-        <td>${v.name}</td>
-        <td class="mono">${v.domain}</td>
-        <td style="font-weight:700">${v.grade||'—'}</td>
-        <td>${v.overallScore??'—'}</td>
-        <td class="mono" style="font-size:10px">${v.lastAssessedAt ? new Date(v.lastAssessedAt).toLocaleDateString() : '—'}</td>
-      </tr>`).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--text2)">No vendors assessed yet</td></tr>';
-  } catch {}
-}
-document.addEventListener('DOMContentLoaded', () => { loadVendorHistory(); });
-
-
-// ─── CQ Canvas Logo ────────────────────────────────────────────────────────
-(function initCQLogo() {
-  const canvas = document.getElementById('cq-canvas');
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  const W = canvas.width;   // 120
-  const H = canvas.height;  // 72
-  const AMBER = '#f09a18';
-  const AMBER_CORE = '#fff4cc';
-
-  // Frame counter and state
-  let frame = 0;
-  // Scanline sweep position (moves down each frame)
-  let sweepY = 0;
-  // Flicker state: brightness multiplier
-  let flicker = 1.0;
-  let flickerTarget = 1.0;
-  let flickerCooldown = 0;
-  // Horizontal glitch shift
-  let glitchShift = 0;
-  let glitchTimer = 0;
-
-  function drawFrame() {
-    frame++;
-
-    // ── Flicker logic ──────────────────────────────────────────────────
-    if (flickerCooldown > 0) {
-      flickerCooldown--;
-    } else {
-      // Occasionally snap to a dimmer value (tube instability)
-      if (Math.random() < 0.018) {
-        flickerTarget = 0.05 + Math.random() * 0.3; // sudden dim
-        flickerCooldown = 1 + Math.floor(Math.random() * 3);
-      } else if (Math.random() < 0.03) {
-        flickerTarget = 0.7 + Math.random() * 0.3;
-        flickerCooldown = 2 + Math.floor(Math.random() * 4);
-      } else {
-        flickerTarget = 0.88 + Math.random() * 0.12;
-      }
-    }
-    flicker += (flickerTarget - flicker) * 0.35;
-
-    // ── Glitch logic ───────────────────────────────────────────────────
-    glitchTimer--;
-    if (glitchTimer <= 0) {
-      if (Math.random() < 0.08) {
-        glitchShift = (Math.random() - 0.5) * 6;
-        glitchTimer = 1 + Math.floor(Math.random() * 3);
-      } else {
-        glitchShift = 0;
-        glitchTimer = 5 + Math.floor(Math.random() * 20);
-      }
-    }
-
-    // ── Clear ─────────────────────────────────────────────────────────
-    ctx.clearRect(0, 0, W, H);
-
-    // ── Phosphor bloom background ──────────────────────────────────────
-    // Soft amber glow behind the letters
-    const bloom = ctx.createRadialGradient(W/2, H/2, 4, W/2, H/2, W * 0.7);
-    bloom.addColorStop(0, `rgba(240,154,24,${0.06 * flicker})`);
-    bloom.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = bloom;
-    ctx.fillRect(0, 0, W, H);
-
-    // ── Draw text (with glow layers) ───────────────────────────────────
-    const font = `900 52px 'Courier New', monospace`;
-    ctx.font = font;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-
-    const cx = W / 2 + glitchShift;
-    const cy = H / 2 + 2;
-
-    // Layer 1: wide outer glow
-    ctx.save();
-    ctx.filter = `blur(8px)`;
-    ctx.globalAlpha = 0.35 * flicker;
-    ctx.fillStyle = AMBER;
-    ctx.fillText('CQ', cx, cy);
-    ctx.restore();
-
-    // Layer 2: mid glow
-    ctx.save();
-    ctx.filter = `blur(3px)`;
-    ctx.globalAlpha = 0.55 * flicker;
-    ctx.fillStyle = AMBER;
-    ctx.fillText('CQ', cx, cy);
-    ctx.restore();
-
-    // Layer 3: sharp core
-    ctx.save();
-    ctx.filter = 'none';
-    ctx.globalAlpha = flicker;
-    ctx.fillStyle = AMBER;
-    ctx.fillText('CQ', cx, cy);
-    ctx.restore();
-
-    // Layer 4: white-hot centre highlight
-    ctx.save();
-    ctx.filter = `blur(1px)`;
-    ctx.globalAlpha = 0.25 * flicker;
-    ctx.fillStyle = AMBER_CORE;
-    ctx.fillText('CQ', cx, cy);
-    ctx.restore();
-
-    // ── CRT Scanlines ─────────────────────────────────────────────────
-    // Static dark scanlines (every 2px, fixed)
-    ctx.save();
-    for (let y = 0; y < H; y += 2) {
-      ctx.fillStyle = `rgba(0,0,0,0.28)`;
-      ctx.fillRect(0, y, W, 1);
-    }
-    ctx.restore();
-
-    // Moving bright sweep scanline (phosphor scan beam)
-    sweepY = (sweepY + 0.8) % H;
-    ctx.save();
-    const sweep = ctx.createLinearGradient(0, sweepY - 6, 0, sweepY + 6);
-    sweep.addColorStop(0,   'rgba(255,220,120,0)');
-    sweep.addColorStop(0.45,'rgba(255,220,120,0.18)');
-    sweep.addColorStop(0.5, 'rgba(255,220,120,0.32)');
-    sweep.addColorStop(0.55,'rgba(255,220,120,0.18)');
-    sweep.addColorStop(1,   'rgba(255,220,120,0)');
-    ctx.fillStyle = sweep;
-    ctx.fillRect(0, sweepY - 6, W, 12);
-    ctx.restore();
-
-    // ── Noise / grain ─────────────────────────────────────────────────
-    if (frame % 2 === 0) { // every other frame for perf
-      const imageData = ctx.getImageData(0, 0, W, H);
-      const d = imageData.data;
-      for (let i = 0; i < d.length; i += 16) { // sample every 4th pixel
-        const n = (Math.random() - 0.5) * 28;
-        d[i]   = Math.min(255, Math.max(0, d[i]   + n));
-        d[i+1] = Math.min(255, Math.max(0, d[i+1] + n * 0.6));
-        d[i+2] = Math.min(255, Math.max(0, d[i+2] + n * 0.1));
-      }
-      ctx.putImageData(imageData, 0, 0);
-    }
-
-    // ── Fuzzy edge vignette on canvas ──────────────────────────────────
-    const vig = ctx.createRadialGradient(W/2, H/2, H * 0.25, W/2, H/2, W * 0.75);
-    vig.addColorStop(0, 'rgba(0,0,0,0)');
-    vig.addColorStop(1, 'rgba(0,0,0,0.55)');
-    ctx.fillStyle = vig;
-    ctx.fillRect(0, 0, W, H);
-
-    requestAnimationFrame(drawFrame);
-  }
-
-  requestAnimationFrame(drawFrame);
-})();
-
-
-// ─── TARGET ACQUISITION heading canvas ───────────────────────────────────────
-(function initTAHeading() {
-  const canvas = document.getElementById('ta-canvas');
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-
-  const TEXT    = 'TARGET ACQUISITION';
-  const FONT    = "700 18px 'Courier New', monospace";
-  const ORANGE  = '#c85a00';
-  const HOT     = '#ff8c2a';
-  const CHAR_SP = 3;
-
-  // Size canvas
-  ctx.font = FONT;
-  const textW = ctx.measureText(TEXT).width + (TEXT.length - 1) * CHAR_SP;
-  const H = 32;
-  canvas.width  = Math.ceil(textW) + 4;
-  canvas.height = H;
-
-  const W = canvas.width;
-
-  // ── Time-based state (all in real milliseconds) ──────────────────
-  // Sweep: one full pass every 72 hours = 259200000 ms
-  const SWEEP_PERIOD_MS   = 259200000;
-
-  // Glitch: fires once every 6–12 hours, chosen randomly each time
-  const GLITCH_MIN_MS     = 21600000;   //  6 hours
-  const GLITCH_GAP_MS     = 21600000;   // +0–6 hours random
-
-  const startTime = Date.now();
-  let nextGlitchAt = startTime + GLITCH_MIN_MS + Math.random() * GLITCH_GAP_MS;
-
-  // Active glitch bands [{y, h, shift, endTime}]
-  let glitchBands = [];
-  const GLITCH_HOLD_MS = 200; // how long each tear is visible (ms)
-
-  // Flicker — stays frame-rate based, lightweight
-  let flicker = 1.0, flickerTarget = 1.0, frameN = 0;
-  // Flicker — time-based, fires every ~45 seconds
-  const FLICKER_MIN_MS = 40000;
-  const FLICKER_GAP_MS = 10000;
-  let nextFlickerAt = startTime + FLICKER_MIN_MS + Math.random() * FLICKER_GAP_MS;
-  let flickerEndAt  = 0;
-
-  function drawLetterspaced(text, x, y) {
-    let cx = x;
-    for (const ch of text) {
-      ctx.fillText(ch, cx, y);
-      cx += ctx.measureText(ch).width + CHAR_SP;
-    }
-  }
-
-  function drawFrame() {
-    frameN++;
-    const now = Date.now();
-    const elapsed = now - startTime;
-
-    // ── Flicker — time-based, ~every 45 seconds ─────────────────
-    if (now >= nextFlickerAt && now < flickerEndAt) {
-      // Mid-flicker: dim
-      flickerTarget = 0.08 + Math.random() * 0.25;
-    } else if (now >= flickerEndAt && flickerEndAt > 0) {
-      // Flicker done: snap back bright
-      flickerTarget = 0.9 + Math.random() * 0.1;
-      flickerEndAt  = 0;
-      nextFlickerAt = now + FLICKER_MIN_MS + Math.random() * FLICKER_GAP_MS;
-    } else if (now >= nextFlickerAt && flickerEndAt === 0) {
-      // Start a flicker: lasts 80–300ms
-      flickerTarget = 0.08 + Math.random() * 0.25;
-      flickerEndAt  = now + 80 + Math.random() * 220;
-    } else {
-      // Idle: gentle breathing variance
-      if (Math.random() < 0.004) flickerTarget = 0.88 + Math.random() * 0.12;
-    }
-    flicker += (flickerTarget - flicker) * 0.25;
-
-    // ── Sweep position — purely time-based ───────────────────────
-    // sweepX goes 0→W over SWEEP_PERIOD_MS, then wraps
-    const sweepX = ((elapsed % SWEEP_PERIOD_MS) / SWEEP_PERIOD_MS) * W;
-
-    // ── Glitch — time-based spawn ─────────────────────────────────
-    if (now >= nextGlitchAt) {
-      // Spawn 2–6 dramatic bands
-      const numBands = 2 + Math.floor(Math.random() * 5);
-      for (let i = 0; i < numBands; i++) {
-        glitchBands.push({
-          y:       Math.floor(Math.random() * H),
-          h:       2 + Math.floor(Math.random() * 7),
-          shift:   (Math.random() < 0.5 ? -1 : 1) * (6 + Math.random() * 22),
-          endTime: now + GLITCH_HOLD_MS + Math.random() * 200,
-        });
-      }
-      // Schedule next glitch
-      nextGlitchAt = now + GLITCH_MIN_MS + Math.random() * GLITCH_GAP_MS;
-    }
-    // Expire dead bands
-    glitchBands = glitchBands.filter(b => now < b.endTime);
-
-    // ── Draw ─────────────────────────────────────────────────────
-    ctx.clearRect(0, 0, W, H);
-    ctx.font = FONT;
-    ctx.textBaseline = 'middle';
-    const y = H / 2 + 1;
-
-    // Glow layers
-    ctx.save(); ctx.filter = 'blur(6px)'; ctx.globalAlpha = 0.4 * flicker;
-    ctx.fillStyle = ORANGE; drawLetterspaced(TEXT, 2, y); ctx.restore();
-
-    ctx.save(); ctx.filter = 'blur(2px)'; ctx.globalAlpha = 0.65 * flicker;
-    ctx.fillStyle = ORANGE; drawLetterspaced(TEXT, 2, y); ctx.restore();
-
-    ctx.save(); ctx.filter = 'none'; ctx.globalAlpha = flicker;
-    ctx.fillStyle = ORANGE; drawLetterspaced(TEXT, 2, y); ctx.restore();
-
-    ctx.save(); ctx.filter = 'blur(1px)'; ctx.globalAlpha = 0.18 * flicker;
-    ctx.fillStyle = HOT; drawLetterspaced(TEXT, 2, y); ctx.restore();
-
-    // Glitch bands
-    for (const b of glitchBands) {
-      if (b.y < 0 || b.y + b.h > H) continue;
-      try {
-        const strip = ctx.getImageData(0, b.y, W, b.h);
-        ctx.putImageData(strip, b.shift, b.y);
-        ctx.fillStyle = 'rgba(200,90,0,0.08)';
-        ctx.fillRect(0, b.y, W, b.h);
-      } catch(e) {}
-    }
-
-    // Static scanlines
-    ctx.save();
-    for (let sy = 0; sy < H; sy += 2) {
-      ctx.fillStyle = 'rgba(0,0,0,0.30)';
-      ctx.fillRect(0, sy, W, 1);
-    }
-    ctx.restore();
-
-    // Moving sweep beam (time-based position)
-    ctx.save();
-    const sg = ctx.createLinearGradient(sweepX - 10, 0, sweepX + 10, 0);
-    sg.addColorStop(0,   'rgba(255,160,60,0)');
-    sg.addColorStop(0.4, 'rgba(255,160,60,0.14)');
-    sg.addColorStop(0.5, 'rgba(255,160,60,0.28)');
-    sg.addColorStop(0.6, 'rgba(255,160,60,0.14)');
-    sg.addColorStop(1,   'rgba(255,160,60,0)');
-    ctx.fillStyle = sg;
-    ctx.fillRect(sweepX - 10, 0, 20, H);
-    ctx.restore();
-
-    // Grain
-    if (frameN % 2 === 0) {
-      const imgData = ctx.getImageData(0, 0, W, H);
-      const d = imgData.data;
-      for (let i = 0; i < d.length; i += 12) {
-        const n = (Math.random() - 0.5) * 22;
-        d[i]   = Math.min(255, Math.max(0, d[i]   + n));
-        d[i+1] = Math.min(255, Math.max(0, d[i+1] + n * 0.4));
-        d[i+2] = Math.min(255, Math.max(0, d[i+2]));
-      }
-      ctx.putImageData(imgData, 0, 0);
-    }
-
-    requestAnimationFrame(drawFrame);
-  }
-
-  requestAnimationFrame(drawFrame);
-})()</script>
-</body>
-</html>
+        <div style="font-size:3rem;font-weight:800;color:${qeiColour};font-family:var(--font-mono);line-height:1">${m.qu
