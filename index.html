@@ -387,6 +387,195 @@
     .scan-form { grid-template-columns: 1fr; }
     input[type="text"] { border-right: 1px solid var(--accent-dim) !important; }
   }
+
+/* ══ DNEL — Deploy Now, Exploit Later ══════════════════════════════════
+   Paste at the END of the style block in index.html. (Note: this comment must
+   never contain a literal closing style tag — the HTML parser ends the element
+   at the first one it sees, even inside a CSS comment, silently dropping
+   everything after it.) Uses the platform's existing tokens
+   (--amber, --danger, --surface …) so it inherits the theme unchanged. */
+
+/* ── Three-axis threat strip ── */
+.dnel-axes {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  margin-bottom: 20px;
+}
+.dnel-axis {
+  background: var(--surface);
+  padding: 16px 18px;
+  border-top: 2px solid var(--border-hi);
+  position: relative;
+}
+.dnel-axis-code {
+  font-family: var(--font-mono);
+  font-size: 0.72rem; font-weight: 800;
+  letter-spacing: 0.24em;
+  color: var(--text);
+  margin-bottom: 5px;
+}
+.dnel-axis-name {
+  font-size: 0.68rem; color: var(--text2);
+  letter-spacing: 0.04em; margin-bottom: 10px;
+}
+.dnel-axis-prop {
+  font-size: 0.52rem; text-transform: uppercase;
+  letter-spacing: 0.22em; color: var(--muted);
+  margin-bottom: 4px;
+}
+.dnel-axis-level {
+  font-family: var(--font-mono);
+  font-size: 1.15rem; font-weight: 800;
+  line-height: 1.2; margin-bottom: 8px;
+}
+.dnel-axis-line {
+  font-size: 0.62rem; color: var(--text2); line-height: 1.6;
+}
+.dnel-axis-critical { border-top-color: var(--danger); }
+.dnel-axis-critical .dnel-axis-level { color: var(--danger); text-shadow: 0 0 10px var(--danger); }
+.dnel-axis-high     { border-top-color: var(--danger); }
+.dnel-axis-high .dnel-axis-level { color: var(--danger); }
+.dnel-axis-elevated { border-top-color: var(--warn); }
+.dnel-axis-elevated .dnel-axis-level { color: var(--warn); text-shadow: 0 0 10px var(--warn); }
+.dnel-axis-low      { border-top-color: var(--ok); }
+.dnel-axis-low .dnel-axis-level { color: var(--ok); }
+.dnel-axis-not-applicable { border-top-color: var(--border-hi); }
+.dnel-axis-not-applicable .dnel-axis-level { color: var(--muted); }
+
+/* The third axis is the one that is new — mark it without shouting. */
+.dnel-axis:last-child::after {
+  content: 'NEW';
+  position: absolute; top: 10px; right: 12px;
+  font-family: var(--font-mono);
+  font-size: 0.45rem; font-weight: 700; letter-spacing: 0.18em;
+  color: var(--amber);
+  border: 1px solid var(--amber-dim);
+  padding: 1px 5px;
+}
+
+/* ── Panel head ── */
+.dnel-head {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 16px;
+  align-items: stretch;
+}
+.dnel-index {
+  background: var(--surface);
+  border: 1px solid var(--border-hi);
+  padding: 24px 20px;
+  text-align: center;
+  display: flex; flex-direction: column; justify-content: center;
+}
+.dnel-index-label {
+  font-size: 0.52rem; letter-spacing: 0.26em;
+  color: var(--text2); margin-bottom: 10px;
+}
+.dnel-index-value {
+  font-family: var(--font-mono);
+  font-size: 3rem; font-weight: 800; line-height: 1;
+}
+.dnel-index-band {
+  font-size: 0.7rem; font-weight: 700;
+  letter-spacing: 0.12em; margin-top: 8px;
+}
+.dnel-index-sub {
+  font-size: 0.6rem; color: var(--text2); margin-top: 10px; line-height: 1.5;
+}
+.dnel-critical { border-color: var(--danger); }
+.dnel-critical .dnel-index-value,
+.dnel-critical .dnel-index-band { color: var(--danger); text-shadow: 0 0 16px rgba(255,51,34,0.5); }
+.dnel-high { border-color: var(--danger); }
+.dnel-high .dnel-index-value, .dnel-high .dnel-index-band { color: var(--danger); }
+.dnel-elevated { border-color: var(--warn); }
+.dnel-elevated .dnel-index-value, .dnel-elevated .dnel-index-band { color: var(--warn); }
+.dnel-low { border-color: var(--ok); }
+.dnel-low .dnel-index-value, .dnel-low .dnel-index-band { color: var(--ok); }
+.dnel-not-applicable { border-color: var(--border); }
+.dnel-not-applicable .dnel-index-value,
+.dnel-not-applicable .dnel-index-band { color: var(--muted); }
+
+.dnel-explain {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 20px 24px;
+}
+.dnel-explain h4 {
+  font-size: 0.62rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.26em;
+  color: var(--amber); margin-bottom: 12px;
+}
+.dnel-explain p {
+  font-size: 0.72rem; color: var(--text2);
+  line-height: 1.75; margin-bottom: 10px;
+}
+.dnel-explain strong { color: var(--text); }
+.dnel-explain .dnel-boundary {
+  margin-top: 14px; padding: 10px 14px;
+  background: var(--amber-pale);
+  border-left: 2px solid var(--amber);
+  color: var(--text2);
+}
+.dnel-explain .dnel-boundary strong { color: var(--amber); }
+.dnel-explain em { color: var(--text); font-style: italic; }
+
+/* ── Badges & chips ── */
+.dnel-badge {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 0.5rem; font-weight: 800;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  padding: 2px 6px; border: 1px solid;
+}
+.dnel-badge.dnel-critical { background: var(--danger-dim); color: #ff5544; border-color: var(--danger); }
+.dnel-badge.dnel-high     { background: var(--danger-dim); color: var(--danger); border-color: var(--danger); }
+.dnel-badge.dnel-elevated { background: var(--warn-dim);   color: var(--warn);   border-color: var(--warn); }
+.dnel-badge.dnel-low      { background: var(--ok-dim);     color: var(--ok);     border-color: var(--ok); }
+.dnel-badge.dnel-not-applicable { background: #1a1a1a; color: var(--muted); border-color: var(--border); }
+
+.dnel-chip {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 0.52rem;
+  padding: 1px 5px; margin: 1px 2px 1px 0;
+  border: 1px solid var(--accent-dim);
+  color: var(--text2);
+  white-space: nowrap;
+}
+
+/* ── Evidence gaps ── */
+.dnel-gaps {
+  margin-top: 18px; padding: 18px 22px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--amber-dim);
+}
+.dnel-gaps-head {
+  font-size: 0.58rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.24em;
+  color: var(--amber); margin-bottom: 14px;
+}
+.dnel-gap {
+  display: grid; grid-template-columns: 260px 1fr;
+  gap: 16px; padding: 8px 0;
+  border-bottom: 1px solid rgba(46,46,46,0.6);
+}
+.dnel-gap:last-of-type { border-bottom: none; }
+.dnel-gap strong { font-size: 0.66rem; color: var(--text); font-weight: 600; }
+.dnel-gap span { font-size: 0.66rem; color: var(--text2); line-height: 1.65; }
+.dnel-gaps-foot {
+  margin-top: 12px; font-size: 0.62rem;
+  color: var(--muted); line-height: 1.6; font-style: italic;
+}
+
+@media (max-width: 960px) {
+  .dnel-axes { grid-template-columns: 1fr; }
+  .dnel-head { grid-template-columns: 1fr; }
+  .dnel-gap { grid-template-columns: 1fr; gap: 4px; }
+}
 </style>
 </head>
 <body>
@@ -461,6 +650,7 @@
 
   <div id="results">
     <div class="summary-grid" id="summary-grid"></div>
+    <div id="threat-axes"></div>
     <div class="risk-banner" id="risk-banner"></div>
     <div class="hndl-window" id="hndl-window"></div>
 
@@ -479,6 +669,7 @@
       <button class="results-tab" onclick="showTab('tab-http-security',this);loadHTTPSecurity().catch(e=>{document.getElementById('http-security-content').innerHTML='<div class=\'empty-state\'><p>Error: '+e.message+'</p></div>';})">HTTP Security</button>
       <button class="results-tab" onclick="showTab('tab-network-security',this);loadNetworkSecurity().catch(e=>{document.getElementById('network-security-content').innerHTML='<div class=\'empty-state\'><p>Error: '+e.message+'</p></div>';})">Network &amp; Ports</button>
       <button class="results-tab" onclick="showTab('tab-cbom',this);loadCBOMDashboard().catch(e=>{document.getElementById('cbom-dashboard-content').innerHTML='<div class=\'empty-state\'><p>Error: '+e.message+'</p></div>';})">CBOM Dashboard</button>
+      <button class="results-tab" onclick="showTab('tab-dnel',this)">DNEL Exposure</button>
       <button class="results-tab" onclick="showTab('tab-vendor',this)">Vendor Scorecard</button>
     </div>
 
@@ -526,7 +717,7 @@
           <thead>
             <tr>
               <th>Hostname</th><th>Protocol</th><th>Cipher</th><th>CA</th>
-              <th>Cert Expiry</th><th>SNI</th><th>OCSP</th><th>SCT</th><th>PQ Ready</th><th>HNDL Risk</th>
+              <th>Cert Expiry</th><th>SNI</th><th>OCSP</th><th>SCT</th><th>PQ Ready</th><th>HNDL Risk</th><th>DNEL</th>
             </tr>
           </thead>
           <tbody id="host-tbody"></tbody>
@@ -584,6 +775,13 @@
     </div>
 
     <!-- Vendor Scorecard Tab -->
+    <div class="tab-panel" id="tab-dnel">
+      <div id="dnel-content">
+        <div class="empty-state"><div class="icon">◈</div>
+          <p>Run a domain scan to compute DNEL exposure. Run the Network &amp; Ports scan for a fully evidenced figure.</p></div>
+      </div>
+    </div>
+
     <div class="tab-panel" id="tab-vendor">
       <div class="scan-panel">
         <h2>Vendor Security Scorecard</h2>
@@ -616,6 +814,703 @@
 
 </div>
 <script>
+/* ════════════════════════════════════════════════════════════════════════
+   CipherQ — DNEL (Deploy Now, Exploit Later)
+   Third quantum risk axis, alongside the hndlRisk and tnflRisk already
+   carried on every host record.
+
+   THE DISTINCTION THIS MODULE ENCODES
+   -----------------------------------
+   HNDL  Confidentiality.  Traffic recorded today is read once a CRQC exists.
+   TNFL  Authenticity.     A recovered signing key MINTS NEW trusted artifacts
+                           — forged certificates, forged updates.
+   DNEL  Access.           The adversary presents GENUINE authentication
+                           material that is legitimately in the trust store.
+                           Nothing is forged. There is no anomaly to detect,
+                           because the credential is real and the login is
+                           well-formed. Non-repudiation fails with it: the
+                           audit trail records a valid operator session.
+
+   That boundary is the whole point. TNFL asks "can an attacker manufacture
+   trust?"  DNEL asks "does an attacker already hold trust we issued?"
+
+   WHAT THIS MODULE MEASURES
+   -------------------------
+   Two conditions have to hold together for DNEL exposure to be real:
+
+     NOTE: these weights mirror dnel.js `hostWeight` exactly. They are the
+     fallback path only — the server's block wins when present. If you change
+     one table, change the other, or the tab and the report will disagree.
+
+     1. an operator-authentication surface is reachable, and
+     2. the material authenticating to it is quantum-vulnerable, or outlives
+        the CRQC window, or both.
+
+   Neither alone is DNEL. An exposed static web host is not a DNEL asset. An
+   internal-only SSH bastion with classical KEX is, once someone can reach it.
+
+   EVIDENCE HONESTY
+   ----------------
+   Every contributing signal is tagged with how it was obtained, and the
+   estate model reports its own confidence. Signals CipherQ cannot yet see —
+   crypto-agility constraints, IdP signing posture, mTLS requirements — are
+   named as gaps rather than silently scored as zero. See dnelEvidenceGaps().
+
+   Depends on nothing. Attach with: CipherQDNEL.compute(...) then .render(...).
+   ════════════════════════════════════════════════════════════════════════ */
+
+var CipherQDNEL = (function () {
+  'use strict';
+
+  /* The horizon this module scores against. Both figures are the page's own
+     stated assumptions — change them here rather than in three places.
+     CRQC_YEAR is an estimate, not a published deadline. DEPRECATION_YEAR is
+     NIST IR 8547's deprecation of RSA-2048 and ECC P-256. */
+  var CRQC_YEAR = 2033;
+  var DEPRECATION_YEAR = 2030;
+
+  /* ── Operator-authentication surfaces ─────────────────────────────────
+     Weight reflects how directly the port fronts an operator login AND how
+     hard the asset behind it is to re-key. OT scores highest: a 20-year
+     replacement cycle means what is deployed now is what is running at
+     Q-Day, and much of it cannot take new cryptography at any price. */
+  var SURFACES = [
+    {
+      key: 'ot-ics',
+      label: 'OT / ICS control',
+      weight: 46,
+      ports: [102, 502, 789, 1911, 2404, 4911, 9600, 20000, 44818, 47808],
+      note: 'Process control reachable from outside. Replacement cycles of 10–30 years mean this is the asset class least able to be re-keyed before a CRQC exists.'
+    },
+    {
+      key: 'directory-auth',
+      label: 'Directory & authentication',
+      weight: 42,
+      ports: [88, 389, 636, 1812, 1813, 3268, 3269],
+      note: 'The credential issuer itself. Compromise here is estate-wide rather than host-local.'
+    },
+    {
+      key: 'remote-admin',
+      label: 'Remote administration',
+      weight: 34,
+      ports: [22, 23, 3389, 5900, 5901, 5985, 5986],
+      note: 'Direct interactive operator access. The canonical DNEL entry point.'
+    },
+    {
+      key: 'vpn-tunnel',
+      label: 'VPN & tunnel concentrators',
+      weight: 34,
+      ports: [500, 1194, 4500, 51820],
+      note: 'Grants network position, not just host access. Handshakes recorded today yield the session keys later.'
+    },
+    {
+      key: 'orchestration',
+      label: 'Orchestration & cluster APIs',
+      weight: 36,
+      ports: [2375, 2376, 2379, 2380, 6443, 10250],
+      note: 'Control-plane credentials, typically long-lived and rarely rotated.'
+    }
+  ];
+
+  var CLEARTEXT_PORTS = [23, 2375];      /* credential recoverable today, no quantum step */
+  var WEAK_AUTH_PORTS = [389, 1812, 1813]; /* credential exposed absent an outer TLS layer */
+
+  var BANDS = [
+    { min: 70, key: 'critical', label: 'CRITICAL' },
+    { min: 50, key: 'high', label: 'HIGH' },
+    { min: 28, key: 'elevated', label: 'ELEVATED' },
+    { min: 1, key: 'low', label: 'LOW' },
+    { min: 0, key: 'not-applicable', label: 'N/A' }
+  ];
+
+  function band(score) {
+    for (var i = 0; i < BANDS.length; i++) if (score >= BANDS[i].min) return BANDS[i];
+    return BANDS[BANDS.length - 1];
+  }
+
+  function surfaceForPort(port) {
+    port = parseInt(port, 10);
+    for (var i = 0; i < SURFACES.length; i++) {
+      if (SURFACES[i].ports.indexOf(port) !== -1) return SURFACES[i];
+    }
+    return null;
+  }
+
+  function esc(v) {
+    return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  /* ══════════════════════════════════════════════════════════════════════
+     COMPUTE
+     ══════════════════════════════════════════════════════════════════════ */
+
+  /**
+   * @param {object} scanData      result of /api/scan
+   * @param {object} [extra]       { network, http, dns } sub-scan results
+   * @returns {object} the DNEL model
+   */
+  function compute(scanData, extra) {
+    extra = extra || {};
+    var net = extra.network || null;
+
+    /* dnel.js on the server computes this from the same port evidence and
+       returns it on the network scan response. Prefer it. Recomputing here
+       would put two independent scorers behind one concept, which is the
+       failure qei.js was written to close — the client-side path below
+       exists only so the tab still works against a server that predates
+       the module. */
+    if (net && net.dnel && net.dnel.assessed) {
+      var served = {};
+      for (var k in net.dnel) served[k] = net.dnel[k];
+      served.confidence = 'observed';
+      served.source = 'server';
+      return served;
+    }
+    var hosts = (scanData && scanData.hosts) || [];
+
+    /* Port evidence, keyed by hostname. Absent unless the network scan ran —
+       which is the single largest determinant of this model's confidence. */
+    var portsByHost = {};
+    var haveNetwork = !!(net && net.report && net.report.portScans);
+    if (haveNetwork) {
+      net.report.portScans.forEach(function (ps) {
+        portsByHost[ps.hostname] = (ps.openPorts || []).map(function (p) {
+          return { port: parseInt(p.port, 10), proto: p.proto, banner: p.banner || '' };
+        });
+      });
+    }
+
+    /* SSH posture. The network scan reports these as estate counts rather
+       than per host, so a shortfall is attributed to the estate, not pinned
+       to a hostname — stated plainly rather than guessed at. */
+    var sshScanned = (net && net.summary && net.summary.sshHostsScanned) || 0;
+    var sshPQReady = (net && net.summary && net.summary.sshPQReady) || 0;
+    var sshClassicalCount = Math.max(0, sshScanned - sshPQReady);
+
+    var now = new Date();
+    var crqcHorizonDays = Math.max(0, (new Date(CRQC_YEAR, 0, 1) - now) / 86400000);
+    var deprecationDays = Math.max(0, (new Date(DEPRECATION_YEAR, 0, 1) - now) / 86400000);
+
+    var results = [];
+    var findings = [];
+    var surfaceTally = {};
+    SURFACES.forEach(function (s) { surfaceTally[s.key] = { hosts: 0, ports: 0, def: s }; });
+
+    hosts.forEach(function (h) {
+      var open = portsByHost[h.hostname] || [];
+      var matched = [];
+      var seenSurfaces = {};
+      var reasons = [];
+
+      /* ── 1. Operator surface — the base exposure ──────────────────────
+         Scored as the WORST surface present plus a small increment per
+         additional class. Two doors are worse than one, not twice as bad,
+         and additive weights made every host with SSH look critical. */
+      var baseWeight = 0;
+      var extraClasses = 0;
+      open.forEach(function (p) {
+        var s = surfaceForPort(p.port);
+        if (!s) return;
+        matched.push({ port: p.port, surface: s.key, label: s.label, banner: p.banner });
+        surfaceTally[s.key].ports++;
+        if (!seenSurfaces[s.key]) {
+          seenSurfaces[s.key] = true;
+          surfaceTally[s.key].hosts++;
+          if (s.weight > baseWeight) baseWeight = s.weight;
+          else extraClasses++;
+          reasons.push({
+            kind: 'surface',
+            text: s.label + ' reachable (port ' + p.port + ')',
+            evidence: 'observed'
+          });
+        }
+      });
+
+      /* No operator surface reachable → not a DNEL asset. Say so, rather
+         than reporting a reassuring low score for a host that was never in
+         scope for this axis. */
+      if (!matched.length) {
+        results.push({
+          hostname: h.hostname,
+          score: 0,
+          band: band(0),
+          surfaces: [],
+          reasons: [],
+          applicable: false,
+          evidence: haveNetwork ? 'observed' : 'not-collected'
+        });
+        return;
+      }
+      var base = baseWeight + Math.min(18, extraClasses * 6);
+
+      /* ── 2. How vulnerable is the authentication to that surface? ──────
+         A multiplier, not an addend. A PQ-ready surface still carries some
+         exposure because the surface exists at all — but not the same
+         exposure as one whose key exchange is recoverable. */
+      var factor = 0.45;
+      var flat = 0;
+
+      var cleartext = matched.filter(function (m) {
+        return CLEARTEXT_PORTS.indexOf(m.port) !== -1;
+      });
+      if (cleartext.length) {
+        factor = 1.0;
+        flat += 25;
+        reasons.push({
+          kind: 'crypto',
+          text: 'Cleartext administration protocol on port ' + cleartext[0].port +
+                ' — the credential is recoverable today, with no quantum step required',
+          evidence: 'observed'
+        });
+      }
+
+      var weakAuth = matched.filter(function (m) {
+        return WEAK_AUTH_PORTS.indexOf(m.port) !== -1;
+      });
+      if (weakAuth.length) {
+        flat += 10;
+        reasons.push({
+          kind: 'crypto',
+          text: 'Credential-bearing service on port ' + weakAuth[0].port +
+                ' exposed without a guaranteed outer TLS layer',
+          evidence: 'observed'
+        });
+      }
+
+      var kexStatus = (h.tls && h.tls.kex && h.tls.kex.pqStatus) || null;
+      if (kexStatus && kexStatus !== 'pq-hybrid') {
+        factor += 0.25;
+        reasons.push({
+          kind: 'crypto',
+          text: 'Key exchange is ' + kexStatus + ' — session material recorded now yields ' +
+                'the authentication exchange later',
+          evidence: 'observed'
+        });
+      }
+
+      var hasSSH = matched.some(function (m) { return m.port === 22; });
+      if (hasSSH && sshClassicalCount > 0) {
+        factor += 0.20;
+        reasons.push({
+          kind: 'crypto',
+          text: 'SSH management plane: ' + sshClassicalCount + ' of ' + sshScanned +
+                ' probed hosts negotiate classical key exchange only',
+          evidence: 'observed-estate'
+        });
+      }
+
+      var sigStatus = (h.tls && h.tls.certSig && h.tls.certSig.pqStatus) || null;
+      if (sigStatus === 'quantum-vulnerable') {
+        factor += 0.10;
+        reasons.push({
+          kind: 'crypto',
+          text: 'Host identity asserted by a quantum-vulnerable certificate signature',
+          evidence: 'observed'
+        });
+      }
+      factor = Math.min(1.0, factor);
+
+      /* ── 3. Credential lifetime against the CRQC window ────────────────
+         The "deploy now" half: material issued today under classical
+         algorithms that is still trusted when it can no longer be trusted. */
+      var days = h.tls && h.tls.certDaysToExpiry;
+      if (typeof days === 'number' && days > 0) {
+        if (days > crqcHorizonDays) {
+          flat += 12;
+          reasons.push({
+            kind: 'lifetime',
+            text: 'Certificate remains valid past the ' + CRQC_YEAR + ' CRQC estimate — ' +
+                  'a credential deployed now that is still trusted then',
+            evidence: 'observed'
+          });
+        } else if (days > deprecationDays) {
+          flat += 6;
+          reasons.push({
+            kind: 'lifetime',
+            text: 'Certificate remains valid past the ' + DEPRECATION_YEAR +
+                  ' NIST IR 8547 deprecation of RSA-2048 and ECC P-256',
+            evidence: 'observed'
+          });
+        }
+      }
+
+      var score = Math.min(100, Math.round(base * factor + flat));
+
+      results.push({
+        hostname: h.hostname,
+        score: score,
+        band: band(score),
+        surfaces: matched,
+        reasons: reasons,
+        applicable: true,
+        evidence: 'observed'
+      });
+    });
+
+    /* ── Findings ─────────────────────────────────────────────────────── */
+    var applicable = results.filter(function (r) { return r.applicable; });
+
+    function addFinding(f) { findings.push(f); }
+
+    SURFACES.forEach(function (s) {
+      var t = surfaceTally[s.key];
+      if (!t.hosts) return;
+      var hostsWith = applicable.filter(function (r) {
+        return r.surfaces.some(function (m) { return m.surface === s.key; });
+      });
+      addFinding({
+        id: 'DNEL-' + s.key.toUpperCase() + '-EXPOSED',
+        severity: s.key === 'ot-ics' ? 'critical' : s.key === 'directory-auth' ? 'critical' : 'high',
+        hostname: hostsWith.map(function (r) { return r.hostname; }).slice(0, 4).join(', ') +
+                  (hostsWith.length > 4 ? ' +' + (hostsWith.length - 4) + ' more' : ''),
+        title: s.label + ' reachable on ' + t.hosts + ' host' + (t.hosts === 1 ? '' : 's'),
+        detail: s.note + ' An adversary holding recovered authentication material for this ' +
+                'surface does not breach anything — they authenticate. The session is well-formed, ' +
+                'the credential is genuine, and the audit trail records a legitimate operator.',
+        recommendation: s.key === 'ot-ics'
+          ? 'Remove direct internet reachability and place behind an authenticated, PQ-capable gateway. ' +
+            'Record the crypto-agility constraint per device: equipment that is certification- or ' +
+            'hardware-locked cannot be remediated by patching and must be scheduled as replacement.'
+          : 'Enable hybrid post-quantum key establishment on this surface, shorten credential lifetimes ' +
+            'so that harvested material expires inside the migration window, and require re-issue rather ' +
+            'than renewal at the next rotation.',
+        nistRef: 'FIPS 203 (ML-KEM) · CNSA 2.0',
+        priority: s.key === 'ot-ics' ? 'P1' : 'P2'
+      });
+    });
+
+    var cleartextHosts = applicable.filter(function (r) {
+      return r.reasons.some(function (x) { return /Cleartext/.test(x.text); });
+    });
+    if (cleartextHosts.length) {
+      addFinding({
+        id: 'DNEL-CLEARTEXT-ADMIN',
+        severity: 'critical',
+        hostname: cleartextHosts.map(function (r) { return r.hostname; }).join(', '),
+        title: 'Cleartext administration protocol exposed',
+        detail: 'Operator credentials traverse this service unencrypted. This is a DNEL exposure that ' +
+                'needs no quantum computer at all — the credential is harvestable today and will still ' +
+                'authenticate whenever it is used.',
+        recommendation: 'Disable the service and rotate every credential that has traversed it.',
+        nistRef: 'CNSA 2.0',
+        priority: 'P1'
+      });
+    }
+
+    if (sshClassicalCount > 0) {
+      addFinding({
+        id: 'DNEL-SSH-CLASSICAL-KEX',
+        severity: 'high',
+        hostname: '',
+        title: sshClassicalCount + ' of ' + sshScanned + ' SSH hosts negotiate classical key exchange',
+        detail: 'SSH is the operator plane. A recorded classical handshake yields the session keys once ' +
+                'a CRQC exists, and with them the authentication exchange inside that session. Host keys ' +
+                'and authorised user keys are long-lived by convention, so the exposure persists across ' +
+                'the whole harvest window rather than expiring with the session.',
+        recommendation: 'Enable mlkem768x25519-sha256 hybrid key exchange (OpenSSH 9.9+), then rotate host ' +
+                        'keys and re-issue user keys so that pre-migration material stops being accepted.',
+        nistRef: 'FIPS 203 (ML-KEM)',
+        priority: 'P1'
+      });
+    }
+
+    var longLived = applicable.filter(function (r) {
+      return r.reasons.some(function (x) { return x.kind === 'lifetime'; });
+    });
+    if (longLived.length) {
+      addFinding({
+        id: 'DNEL-CREDENTIAL-LIFETIME',
+        severity: 'medium',
+        hostname: longLived.map(function (r) { return r.hostname; }).slice(0, 4).join(', '),
+        title: longLived.length + ' operator-facing credential' + (longLived.length === 1 ? '' : 's') +
+               ' outlive the migration window',
+        detail: 'These credentials are valid beyond the point at which the algorithms underwriting them ' +
+                'are deprecated or breakable. This is the "deploy now" half of DNEL: material issued ' +
+                'today, under classical cryptography, still being trusted when it can no longer be trusted.',
+        recommendation: 'Cap credential lifetime for operator-facing services so that no certificate ' +
+                        'issued under classical algorithms remains valid past the deprecation date.',
+        nistRef: 'NIST IR 8547',
+        priority: 'P2'
+      });
+    }
+
+    /* ── Estate index ─────────────────────────────────────────────────── */
+    var index = 0;
+    if (applicable.length) {
+      var top = applicable.slice().sort(function (a, b) { return b.score - a.score; });
+      /* Weighted toward the worst assets: an estate is as exposed as its most
+         reachable operator surface, not as its average host. */
+      var worst = top[0].score;
+      var mean = top.reduce(function (a, r) { return a + r.score; }, 0) / top.length;
+      index = Math.round(worst * 0.6 + mean * 0.4);
+    }
+
+    return {
+      index: index,
+      band: band(index),
+      hosts: results,
+      applicableHosts: applicable.length,
+      totalHosts: results.length,
+      surfaces: SURFACES.map(function (s) {
+        return {
+          key: s.key, label: s.label, note: s.note,
+          hosts: surfaceTally[s.key].hosts, ports: surfaceTally[s.key].ports
+        };
+      }).filter(function (s) { return s.hosts > 0; }),
+      findings: findings,
+      ssh: { scanned: sshScanned, pqReady: sshPQReady, classical: sshClassicalCount },
+      confidence: haveNetwork ? 'observed' : 'partial',
+      source: 'client',
+      haveNetwork: haveNetwork,
+      gaps: evidenceGaps(haveNetwork)
+    };
+  }
+
+  /* Signals that bear on DNEL and are NOT yet collected. Naming these keeps
+     the index honest: a low score with three of these open is a low score
+     about the part we can see. */
+  function evidenceGaps(haveNetwork) {
+    var gaps = [];
+    if (!haveNetwork) {
+      gaps.push({
+        key: 'network-scan',
+        label: 'Network & port scan not run',
+        detail: 'Operator surfaces are discovered from open ports. Without the network scan this index ' +
+                'reflects TLS evidence only and will understate exposure. Run the Network & Ports tab.'
+      });
+    }
+    gaps.push({
+      key: 'agility',
+      label: 'Crypto-agility constraint per asset',
+      detail: 'Whether a device can accept new cryptography at all — field-upgradable, firmware-locked, ' +
+              'certification-locked or hardware-locked. Not observable over the wire; needs attested ' +
+              'import. This is the single largest determinant of real DNEL exposure and the largest gap.'
+    });
+    gaps.push({
+      key: 'idp',
+      label: 'Identity provider signing posture',
+      detail: 'OIDC discovery and JWKS publish id_token signing algorithms and key types directly, and ' +
+              'parse like a certificate. This is the operator authentication layer and is fetchable ' +
+              'without credentials — already scoped as Phase 1 in the endpoint coverage matrix.'
+    });
+    gaps.push({
+      key: 'mtls',
+      label: 'Client certificate / mTLS requirement',
+      detail: 'Whether a surface authenticates its clients cryptographically, and under which algorithms. ' +
+              'Detectable by probing for a CertificateRequest in the handshake.'
+    });
+    return gaps;
+  }
+
+  /* ══════════════════════════════════════════════════════════════════════
+     RENDER
+     ══════════════════════════════════════════════════════════════════════ */
+
+  var AXES = [
+    {
+      code: 'HNDL', name: 'Harvest Now, Decrypt Later', property: 'Confidentiality',
+      line: 'Traffic recorded today is read once a CRQC exists.'
+    },
+    {
+      code: 'TNFL', name: 'Trust Now, Forge Later', property: 'Authenticity',
+      line: 'A recovered signing key mints new trusted artifacts.'
+    },
+    {
+      code: 'DNEL', name: 'Deploy Now, Exploit Later', property: 'Access &amp; non-repudiation',
+      line: 'Genuine credentials are presented. Nothing is forged, so nothing looks wrong.'
+    }
+  ];
+
+  /** Three-axis strip. Pass the whole scan result and the DNEL model. */
+  function renderAxes(containerId, scanData, model) {
+    var el = document.getElementById(containerId);
+    if (!el) return;
+
+    var summary = (scanData && scanData.summary) || {};
+    var hosts = (scanData && scanData.hosts) || [];
+    var hndl = summary.overallHndlRisk || 'unknown';
+
+    /* tnflRisk already lives on every host record — read the worst one
+       rather than inferring a level the scan already decided. */
+    var TNFL_RANK = { high: 3, unknown: 2, mitigated: 1, 'not-applicable': 0 };
+    var worstTnfl = 'not-applicable';
+    hosts.forEach(function (h) {
+      var r = h.tnflRisk || 'unknown';
+      if ((TNFL_RANK[r] || 0) > (TNFL_RANK[worstTnfl] || 0)) worstTnfl = r;
+    });
+    var tnflCls = worstTnfl === 'high' ? 'critical'
+                : worstTnfl === 'unknown' ? 'elevated'
+                : worstTnfl === 'mitigated' ? 'low' : 'not-applicable';
+
+    var levels = {
+      HNDL: {
+        text: String(hndl).toUpperCase().replace(/-/g, ' '),
+        cls: /^high/.test(hndl) ? 'critical' : hndl === 'partial' ? 'elevated' : 'not-applicable'
+      },
+      TNFL: { text: String(worstTnfl).toUpperCase().replace(/-/g, ' '), cls: tnflCls },
+      DNEL: { text: model ? model.band.label : '—', cls: model ? model.band.key : 'not-applicable' }
+    };
+
+    el.innerHTML = '<div class="dnel-axes">' + AXES.map(function (a) {
+      var lv = levels[a.code];
+      return '<div class="dnel-axis dnel-axis-' + lv.cls + '">' +
+        '<div class="dnel-axis-code">' + a.code + '</div>' +
+        '<div class="dnel-axis-name">' + a.name + '</div>' +
+        '<div class="dnel-axis-prop">' + a.property + '</div>' +
+        '<div class="dnel-axis-level">' + lv.text + '</div>' +
+        '<div class="dnel-axis-line">' + a.line + '</div>' +
+        '</div>';
+    }).join('') + '</div>';
+  }
+
+  /** Full DNEL panel. */
+  function render(containerId, model) {
+    var el = document.getElementById(containerId);
+    if (!el) return;
+    if (!model) {
+      el.innerHTML = '<div class="empty-state"><div class="icon">◈</div>' +
+        '<p>Run a domain scan to compute DNEL exposure.</p></div>';
+      return;
+    }
+
+    var surfaces = model.surfaces.map(function (s) {
+      return '<div class="ca-bar-row" style="grid-template-columns:190px 1fr 34px">' +
+        '<div class="ca-name" title="' + esc(s.note) + '">' + esc(s.label) + '</div>' +
+        '<div class="ca-bar-track"><div class="ca-bar-fill" style="width:' +
+          Math.min(100, (s.hosts / Math.max(1, model.applicableHosts)) * 100) + '%"></div></div>' +
+        '<div class="ca-count">' + s.hosts + '</div></div>';
+    }).join('') || '<div style="padding:12px;color:var(--text2);font-size:12px">' +
+      'No operator-authentication surface observed.</div>';
+
+    var ranked = model.hosts.filter(function (h) { return h.applicable; })
+      .sort(function (a, b) { return b.score - a.score; });
+
+    var rows = ranked.map(function (h) {
+      return '<tr>' +
+        '<td class="mono">' + esc(h.hostname) + '</td>' +
+        '<td>' + h.surfaces.map(function (m) {
+          return '<span class="dnel-chip">' + esc(m.label.split(' ')[0]) + ':' + m.port + '</span>';
+        }).join(' ') + '</td>' +
+        '<td class="mono">' + h.score + '</td>' +
+        '<td><span class="dnel-badge dnel-' + h.band.key + '">' + h.band.label + '</span></td>' +
+        '</tr>';
+    }).join('') || '<tr><td colspan="4" style="text-align:center;color:var(--text2);padding:20px">' +
+      'No host exposes an operator-authentication surface.</td></tr>';
+
+    var sevOrder = ['critical', 'high', 'medium', 'low', 'info'];
+    var sorted = model.findings.slice().sort(function (a, b) {
+      return sevOrder.indexOf(a.severity) - sevOrder.indexOf(b.severity);
+    });
+    var findingsHTML = sorted.length
+      ? sorted.map(function (f, i) {
+          return '<div class="finding-item" onclick="toggleFinding(\'dnel' + i + '\')">' +
+            '<div class="finding-host">' + esc(f.hostname) + '</div>' +
+            '<div class="finding-header"><span class="sev-badge sev-' + f.severity + '">' + f.severity +
+              '</span><span class="finding-title">' + esc(f.title) + '</span></div>' +
+            '<div class="finding-detail" id="dnel' + i + '"><p>' + esc(f.detail) + '</p>' +
+            (f.recommendation ? '<div class="finding-rec">→ ' + esc(f.recommendation) + '</div>' : '') +
+            (f.nistRef ? '<div class="finding-nist">Reference: ' + esc(f.nistRef) + '</div>' : '') +
+            (f.priority ? '<div class="finding-nist">Priority: ' + esc(f.priority) + '</div>' : '') +
+            '</div></div>';
+        }).join('')
+      : '<div class="empty-state"><div class="icon">✓</div><p>No DNEL findings.</p></div>';
+
+    var gapsHTML = model.gaps.map(function (g) {
+      return '<div class="dnel-gap"><strong>' + esc(g.label) + '</strong><span>' + esc(g.detail) + '</span></div>';
+    }).join('');
+
+    el.innerHTML =
+      '<div class="dnel-head">' +
+        '<div class="dnel-index dnel-' + model.band.key + '">' +
+          '<div class="dnel-index-label">DNEL EXPOSURE INDEX</div>' +
+          '<div class="dnel-index-value">' + model.index + '</div>' +
+          '<div class="dnel-index-band">' + model.band.label + '</div>' +
+          '<div class="dnel-index-sub">' + model.applicableHosts + ' of ' + model.totalHosts +
+            ' hosts expose an operator surface</div>' +
+        '</div>' +
+        '<div class="dnel-explain">' +
+          '<h4>Deploy Now, Exploit Later</h4>' +
+          '<p>At Q-Day an adversary does not need to decrypt your data or forge a document. They present ' +
+          '<strong>genuine authentication material</strong> — credentials that are legitimately in your ' +
+          'trust store — and log on as an authorised operator.</p>' +
+          '<p>This is not a breach. There is no perimeter event, no malformed request, no anomaly. The ' +
+          'session is valid because the credential is valid. Non-repudiation fails in the same moment: ' +
+          'the audit trail faithfully records an authorised operator doing authorised things.</p>' +
+          '<p class="dnel-boundary"><strong>Against TNFL:</strong> forgery mints <em>new</em> trust from a ' +
+          'recovered key. DNEL presents trust you already issued. The detection problem is different — ' +
+          'there is no forged artifact to catch.</p>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="summary-grid" style="margin:18px 0">' +
+        '<div class="stat-card"><div class="stat-label">Operator Surfaces</div>' +
+          '<div class="stat-value ' + (model.surfaces.length ? 'stat-danger' : 'stat-ok') + '">' +
+          model.surfaces.length + '</div><div class="stat-sub">classes reachable</div></div>' +
+        '<div class="stat-card"><div class="stat-label">SSH Classical KEX</div>' +
+          '<div class="stat-value ' + (model.ssh.classical ? 'stat-danger' : 'stat-ok') + '">' +
+          model.ssh.classical + '</div><div class="stat-sub">of ' + model.ssh.scanned + ' probed</div></div>' +
+        '<div class="stat-card"><div class="stat-label">Critical DNEL Hosts</div>' +
+          '<div class="stat-value stat-danger">' +
+          ranked.filter(function (h) { return h.band.key === 'critical' || h.band.key === 'high'; }).length +
+          '</div><div class="stat-sub">high or above</div></div>' +
+        '<div class="stat-card"><div class="stat-label">Evidence</div>' +
+          '<div class="stat-value ' + (model.confidence === 'observed' ? 'stat-ok' : 'stat-warn') + '" ' +
+          'style="font-size:1.1rem">' + model.confidence.toUpperCase() + '</div>' +
+          '<div class="stat-sub">' + model.gaps.length + ' signal gap' +
+          (model.gaps.length === 1 ? '' : 's') + '</div></div>' +
+      '</div>' +
+
+      '<div class="results-layout">' +
+        '<div class="findings-section">' +
+          '<div class="section-header"><h3>DNEL Findings</h3>' +
+            '<span class="count-badge">' + sorted.length + '</span></div>' +
+          findingsHTML +
+        '</div>' +
+        '<div class="sidebar">' +
+          '<div class="host-table-card"><div class="section-header"><h3>Operator Surfaces</h3></div>' +
+            '<div class="ca-chart">' + surfaces + '</div></div>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="host-table-card" style="margin-top:16px">' +
+        '<div class="section-header"><h3>Per-Host DNEL Exposure</h3></div>' +
+        '<table><thead><tr><th>Hostname</th><th>Surfaces</th><th>Score</th><th>Band</th></tr></thead>' +
+        '<tbody>' + rows + '</tbody></table>' +
+      '</div>' +
+
+      '<div class="dnel-gaps">' +
+        '<div class="dnel-gaps-head">■ What this index does not yet see</div>' +
+        gapsHTML +
+        '<p class="dnel-gaps-foot">A DNEL score is a statement about observed surfaces. These signals are ' +
+        'named rather than scored as zero, so the index is not read as more complete than it is.</p>' +
+      '</div>';
+  }
+
+  return {
+    compute: compute,
+    render: render,
+    renderAxes: renderAxes,
+    SURFACES: SURFACES,
+    CRQC_YEAR: CRQC_YEAR
+  };
+})();
+
+if (typeof module !== 'undefined' && module.exports) module.exports = CipherQDNEL;
+
+/* Recompute and repaint the DNEL axis. Safe at any point after a scan:
+   called once from renderResults() and again once the network scan lands. */
+function refreshDNEL() {
+  if (!scanData) return;
+  dnelModel = CipherQDNEL.compute(scanData, {
+    network: networkSecData, http: httpSecData, dns: dnsSecData
+  });
+  CipherQDNEL.renderAxes('threat-axes', scanData, dnelModel);
+  CipherQDNEL.render('dnel-content', dnelModel);
+  if (scanData.hosts) renderHostTable(scanData.hosts);   // pick up the DNEL column
+}
+
 // ─── State ────────────────────────────────────────────────────────────────────
 let scanData = null;
 let currentFilter = 'all';
@@ -623,6 +1518,7 @@ let logLines = 0;
 let dnsSecLoaded = false, dnsSecData = null;
 let httpSecLoaded = false, httpSecData = null;
 let networkSecLoaded = false, networkSecData = null;
+let dnelModel = null;
 let boardMetricsData = null;
 let currentVendorResult = null;
 let selectedSensitivity = 'general';
@@ -743,7 +1639,7 @@ async function startScan() {
   document.getElementById('scan-btn').textContent = '⏳ Scanning...';
   dnsSecLoaded = false; dnsSecData = null;
   httpSecLoaded = false; httpSecData = null;
-  networkSecLoaded = false; networkSecData = null;
+  networkSecLoaded = false; networkSecData = null; dnelModel = null;
   boardMetricsData = null;
   window.lastCodeScanData = null;
   window.lastPkiScanData = null;
@@ -917,6 +1813,10 @@ function renderResults(data) {
   renderCertHygienePanel(hosts);
   if (data.kexProbeResults) renderKEXPanel(data.kexProbeResults);
 
+  // DNEL — third risk axis. Recomputed after the network scan, which is
+  // where the operator-surface evidence actually comes from.
+  refreshDNEL();
+
   document.getElementById('results').classList.add('visible');
   document.getElementById('results').scrollIntoView({ behavior: 'smooth', block: 'start' });
   updateTicker(summary, null);
@@ -1050,6 +1950,7 @@ function renderHostTable(hosts) {
     const sni = h.tls?.sniMatch;
     const days = h.tls?.certDaysToExpiry;
     const expiryClass = days != null ? (days < 14 ? 'text-danger' : days < 30 ? 'text-warn' : 'text-ok') : '';
+    const dnel = dnelModel?.hosts?.find(x => x.hostname === h.hostname) || null;
     const ocspOk = h.tls?.ocspStapling;
     const sctOk  = h.tls?.sctPresent;
     return `<tr>
@@ -1063,8 +1964,9 @@ function renderHostTable(hosts) {
       <td style="color:${sctOk  == null ? 'var(--muted)' : sctOk  ? 'var(--ok)' : 'var(--warn)'}">${sctOk  == null ? '—' : sctOk  ? '✓' : '✗'}</td>
       <td><span class="pq-badge pq-${h.pqReadiness}">${h.pqReadiness}</span></td>
       <td><span class="${h.hndlRisk === 'mitigated' ? 'text-ok' : h.hndlRisk === 'not-applicable' ? '' : 'text-danger'}">${h.hndlRisk}</span></td>
+      <td><span class="dnel-badge dnel-${dnel ? dnel.band.key : 'not-applicable'}">${dnel ? dnel.band.label : '—'}</span></td>
     </tr>`;
-  }).join('') || '<tr><td colspan="10" style="text-align:center;color:var(--text2);padding:20px">No reachable hosts found</td></tr>';
+  }).join('') || '<tr><td colspan="11" style="text-align:center;color:var(--text2);padding:20px">No reachable hosts found</td></tr>';
 }
 
 // ─── DNS Surface ──────────────────────────────────────────────────────────────
@@ -1365,6 +2267,7 @@ async function loadNetworkSecurity() {
     const resp = await fetch('/api/network-scan', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ domain: scanData.summary.domain, hosts: scanData.hosts.filter(h=>h.dns?.resolves) }) });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     networkSecData = await resp.json(); networkSecLoaded = true;
+    refreshDNEL();   // operator surfaces come from open ports
     const openPorts = networkSecData.report?.portScans?.flatMap(s => s.openPorts.map(p => ({...p, hostname: s.hostname}))) || [];
     renderSecurityTab('network-security-content', networkSecData, 'Network & Protocol Security', [
       { label:'IPs Scanned',   value: networkSecData.summary?.ipsScanned,     bad: ()=>false },
@@ -1428,17 +2331,23 @@ async function loadCBOMDashboard() {
 
 function renderCBOMDashboard(m) {
   const container = document.getElementById('cbom-dashboard-content');
-  const qeiColour = m.quantumExposureIndex >= 70 ? 'var(--danger)' : m.quantumExposureIndex >= 40 ? 'var(--warn)' : 'var(--ok)';
-  const qeiLabel  = m.quantumExposureIndex >= 70 ? 'HIGH EXPOSURE' : m.quantumExposureIndex >= 40 ? 'MODERATE' : 'LOW EXPOSURE';
+  // Bands are proportional. When the client's retention period has not been
+  // supplied the data-lifetime dimension is unassessed and the index is out of
+  // 80, so a fixed 70/40 threshold would read 58-of-80 (72%) as MODERATE.
+  const qeiMax = m.quantumExposureMax || 100;
+  const qeiShare = qeiMax > 0 ? m.quantumExposureIndex / qeiMax : 0;
+  const qeiColour = qeiShare >= 0.7 ? 'var(--danger)' : qeiShare >= 0.4 ? 'var(--warn)' : 'var(--ok)';
+  const qeiLabel  = qeiShare >= 0.7 ? 'HIGH EXPOSURE' : qeiShare >= 0.4 ? 'MODERATE' : 'LOW EXPOSURE';
   const trend = m.quantumExposureTrend;
 
   container.innerHTML = `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:24px">
       <div style="background:var(--surface);border:1px solid ${qeiColour};padding:24px;text-align:center">
         <div style="font-size:0.55rem;letter-spacing:0.28em;color:var(--text2);font-weight:400;margin-bottom:10px">QUANTUM EXPOSURE INDEX</div>
-        <div style="font-size:3rem;font-weight:800;color:${qeiColour};font-family:var(--font-mono);line-height:1">${m.quantumExposureIndex}</div>
+        <div style="font-size:3rem;font-weight:800;color:${qeiColour};font-family:var(--font-mono);line-height:1">${m.quantumExposureIndex}${qeiMax !== 100 ? `<span style="font-size:1.2rem;color:var(--text2)"> / ${qeiMax}</span>` : ''}</div>
+        ${qeiMax !== 100 ? `<div style="font-size:0.6rem;color:var(--warn);margin-top:6px">Data lifetime unassessed — set the client’s retention period</div>` : ''}
         <div style="font-size:0.7rem;color:${qeiColour};font-weight:700;margin-top:8px;letter-spacing:0.1em">${qeiLabel}</div>
-        ${trend != null ? '<div style="font-size:0.65rem;color:var(--text2);margin-top:8px">'+(trend>0?'▲':trend<0?'▼':'—')+' '+Math.abs(trend)+' vs previous scan</div>' : ''}
+        ${trend != null ? '<div style="font-size:0.65rem;color:var(--text2);margin-top:8px">'+(trend>0?'▲':trend<0?'▼':'—')+' '+Math.abs(trend)+' vs previous scan</div>' : m.quantumExposureTrendSuppressed ? '<div style="font-size:0.6rem;color:var(--text2);margin-top:8px">No trend: '+m.quantumExposureTrendSuppressed+'</div>' : ''}
       </div>
       <div style="background:var(--surface);border:1px solid var(--border-hi);padding:24px;text-align:center">
         <div style="font-size:0.55rem;letter-spacing:0.28em;color:var(--text2);font-weight:400;margin-bottom:10px">CRYPTOGRAPHIC DEBT</div>
@@ -1673,6 +2582,25 @@ async function downloadReport() {
         }),
       }, 90000);
     } finally { clearInterval(pulse); }
+
+    // 409 — the report profile is incomplete. These are judgements a scan
+    // cannot make, so name them rather than showing a bare status code.
+    //
+    // The sensitivity selector carries a dataRetainYears default per sector,
+    // and it is tempting to pass that through as the retention period. It is a
+    // sector typical, not this client's attested obligation, and it is worth 20
+    // index points and the whole exposure window. Use it to pre-fill the
+    // profile if you like; do not let it stand in for an answer.
+    if (response.status === 409) {
+      let body = {};
+      try { body = await response.json(); } catch {}
+      const fields = (body.missing || []).map(x => '  • ' + x.field + ' — ' + x.why).join('\n');
+      throw new Error(
+        (body.error || 'Report profile incomplete.') + '\n\n' +
+        (fields || '') + '\n\n' +
+        'Set these via PUT /api/report/profile/' + (body.domain || '<domain>') + ', then request the report again.'
+      );
+    }
 
     if (!response.ok) {
       let errMsg = 'HTTP ' + response.status;

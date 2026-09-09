@@ -73,7 +73,7 @@ const SEV_WEIGHT = { critical: 25, high: 15, medium: 5, low: 1, info: 0 };
 // be told apart rather than silently compared as if they meant the same
 // thing. Stored alongside every persisted scan record and surfaced in
 // getBoardMetrics.
-const QEI_METHOD_VERSION = 1;
+const QEI_METHOD_VERSION = 2;   // 1 was the retired in-house scorer
 
 function scoreSeverity(findings = []) {
   return findings.reduce((acc, f) => acc + (SEV_WEIGHT[f.severity] || 0), 0);
@@ -90,79 +90,53 @@ function countBySev(findings = []) {
 }
 
 // ─── Quantum Exposure Index ───────────────────────────────────────────────────
-// 0 = perfect PQ posture; 100 = maximum exposure
-// Driven by: PQ readiness of reachable hosts, KEX status, cert posture, HNDL risk
+// 0 = perfect PQ posture; 100 = maximum exposure.
+//
+// The methodology lives in qei.js and is shared with the QEA report generator.
+// It used to live here, weighted KEX 0-50, an HNDL label 0-20, critical TLS
+// findings 0-15, dev hosts 0-10, DNS -10 and SSH 0-5. Both that score and the
+// report's were called a QEI and both ran 0-100, so a dashboard reading 61 and
+// a delivered report reading 74 could describe the same estate on the same day.
+//
+// The report's methodology won because it has a data-lifetime dimension —
+// retention against the CRQC estimate is the argument the report makes, and a
+// score blind to it cannot distinguish a 15-year firm from a 2-year one with
+// identical infrastructure — and because every dimension decomposes into
+// points, a maximum, and the observation behind it.
+//
+// Retention is client-attested and often unset, in which case the data-lifetime
+// dimension is marked unassessed and dropped from the denominator: the result
+// is 58 out of 80, never 58 presented as if out of 100.
 
-// Fallback only: approximates a QEI for scan records persisted before the
-// qei-consolidation fix (F16), which only have the lightweight stored
-// summary fields (not the full scanResult), so it can't use the same
-// computation as computeQEI(). Every scan persisted after this fix stores
-// its QEI directly via computeQEI() at persist time — this function should
-// only ever run against historical data.
-function estimateLegacyQEI(scanRecord) {
-  const pb = scanRecord.pqReadinessBreakdown || {};
-  const total = scanRecord.hostsReachable || 1;
-  let qei = 0;
-  qei += Math.round((pb.none    || 0) / total * 50);
-  qei += Math.round((pb.unknown || 0) / total * 30);
-  qei -= Math.round((pb.ready   || 0) / total * 30);
-  if (scanRecord.overallHndlRisk === 'high') qei += 20;
-  else if (scanRecord.overallHndlRisk === 'high-likely') qei += 15;
-  qei += Math.min(15, (scanRecord.findingsBySeverity?.critical || 0) * 3);
-  return Math.max(0, Math.min(100, qei));
-}
+const { computeQEI: scoreQEI } = require('./qei');
+const { deriveFacts } = require('./qea-input');
+const reportProfile = require('./report-profile');
 
-function computeQEI(scanResult, dnsData, httpData, networkData) {
-  const { summary, hosts } = scanResult;
-  const reachable = hosts.filter(h => h.tls?.cipher);
-
-  let score = 0;
-
-  // — KEX posture (0-50 pts) ———————————————————————————————
-  if (reachable.length > 0) {
-    const pqNone    = reachable.filter(h => h.pqReadiness === 'none').length;
-    const pqUnknown = reachable.filter(h => h.pqReadiness === 'unknown').length;
-    const pqReady   = reachable.filter(h => h.pqReadiness === 'ready').length;
-
-    const pqNonePct    = pqNone    / reachable.length;
-    const pqUnknownPct = pqUnknown / reachable.length;
-    const pqReadyPct   = pqReady   / reachable.length;
-
-    score += Math.round(pqNonePct    * 50);
-    score += Math.round(pqUnknownPct * 30);
-    score -= Math.round(pqReadyPct   * 30);
-  } else {
-    score += 20; // no reachable hosts = cannot assess
-  }
-
-  // — HNDL risk label (0-20 pts) ———————————————————————————
-  if (summary.overallHndlRisk === 'high')         score += 20;
-  else if (summary.overallHndlRisk === 'high-likely') score += 15;
-  else if (summary.overallHndlRisk === 'partial') score += 8;
-
-  // — Critical TLS findings (0-15 pts) ————————————————————
-  const criticalTLS = (scanResult.findings || []).filter(
-    f => f.severity === 'critical' && f.area?.startsWith('tls')
-  ).length;
-  score += Math.min(15, criticalTLS * 5);
-
-  // — Dev hosts / SNI mismatches (0-10 pts) ———————————————
-  score += Math.min(10, (summary.devHostsExposed?.length || 0) * 3 +
-                        (summary.sniMismatches?.length   || 0) * 2);
-
-  // — DNS security deductions (-5 pts for good posture) ————
-  const ds = dnsData?.report?.summary || {};
-  if (ds.dnssecDeployed) score -= 5;
-  if (ds.dmarcPolicy === 'reject') score -= 3;
-  if (!ds.axfrVulnerable && dnsData) score -= 2;
-
-  // — SSH (0-5 pts) ————————————————————————————————————————
-  const ns = networkData?.summary || {};
-  if (ns.sshHostsScanned > 0 && ns.sshPQReady < ns.sshHostsScanned) {
-    score += Math.min(5, (ns.sshHostsScanned - ns.sshPQReady) * 2);
-  }
-
-  return Math.max(0, Math.min(100, score));
+function computeQEI(scanResult, dnsData, httpData, networkData, retentionYears = null) {
+  /* networkData was accepted and then ignored. With DNEL in the index it
+     carries the operator-surface evidence, so a dashboard computed without
+     it would disagree with a report computed with it — the exact split this
+     file's header describes closing. deriveFacts now takes it. */
+  const f = deriveFacts(scanResult, httpData, networkData);
+  return scoreQEI({
+    reachable: f.reachable,
+    hostsWithPqKex: f.pqHosts,
+    hostsTls13: f.reachableHosts.filter(h => h.tls.protocol === 'TLSv1.3').length,
+    certsExpiring90d: f.expiring90,
+    sniMismatches: f.mismatches,
+    allCertsPq: f.reachable > 0 && f.pqSigCount === f.reachable,
+    hostsNoHsts: f.noHsts === null ? 0 : f.noHsts,
+    hostsNoCsp: f.noCsp === null ? 0 : f.noCsp,
+    mixedContentHosts: f.mixed === null ? 0 : f.mixed,
+    hostsBelowTls13: f.belowTls13,
+    devOrStagingReachable: f.devHosts,
+    dormantDnsRecords: f.dormant,
+    dnel: f.dnel && f.dnel.facts,
+  }, {
+    retentionYears,
+    assessmentYear: new Date().getFullYear(),
+    crqcYear: 2033,
+  });
 }
 
 // ─── Public: persistScan ──────────────────────────────────────────────────────
@@ -186,7 +160,12 @@ function persistScan(domain, scanResult, dnsData = null, httpData = null, networ
   // meaning the CBOM Dashboard and the downloaded report could disagree
   // about the headline number. Storing that one computed value here and
   // having getBoardMetrics simply read it back closes that gap.
-  const qei = computeQEI(scanResult, dnsData, httpData, networkData);
+  // Retention comes from the client's report profile when one exists. Without
+  // it the data-lifetime dimension is unassessed and qeiMax is 80, which the
+  // dashboard must show rather than rounding up to an implied 100.
+  const retention = reportProfile.retentionYears(domain, tenantId);
+  const scored = computeQEI(scanResult, dnsData, httpData, networkData, retention);
+  const qei = scored.qei;
 
   const scanRecord = {
     id:          `scan_${Date.now()}`,
@@ -199,6 +178,9 @@ function persistScan(domain, scanResult, dnsData = null, httpData = null, networ
     pqReadinessBreakdown: scanResult.summary.pqReadinessBreakdown,
     overallHndlRisk: scanResult.summary.overallHndlRisk,
     qei,
+    qeiMax: scored.qeiMax,
+    qeiComplete: scored.complete,
+    qeiComponents: scored.components,
     qeiMethodVersion: QEI_METHOD_VERSION,
   };
 
@@ -248,7 +230,10 @@ function getBoardMetrics(domain, tenantId = DEFAULT_TENANT) {
       domain,
       lastScanAt: null,
       quantumExposureIndex: null,
+      quantumExposureMax: null,
+      quantumExposureComplete: false,
       quantumExposureTrend: null,
+      quantumExposureTrendSuppressed: null,
       assetInventory: { total: 0, pqNone: 0, pqUnknown: 0, pqPartial: 0, pqReady: 0, pqReadyPercent: 0 },
       findingsOpen: { critical: 0, high: 0, medium: 0, low: 0, info: 0 },
       cryptographicDebt: { openFindings: 0, estimatedEffortDays: 0 },
@@ -270,13 +255,27 @@ function getBoardMetrics(domain, tenantId = DEFAULT_TENANT) {
   // than silently blended in with properly-computed values.
   const hasStoredQEI = typeof latestScan.qei === 'number';
   const qei = hasStoredQEI ? latestScan.qei : estimateLegacyQEI(latestScan);
-  const qeiMethodVersion = hasStoredQEI ? latestScan.qeiMethodVersion : 0;
+  const qeiMethodVersion = hasStoredQEI ? (latestScan.qeiMethodVersion || 0) : 0;
+  const qeiMax = latestScan.qeiMax || 100;
+  const qeiComplete = latestScan.qeiComplete !== false;
 
+  // A trend is only meaningful between two scores computed under the same
+  // rules and against the same denominator. Subtracting a 58-of-80 from a
+  // 74-of-100, or a v1 index from a v2 one, produces a number that looks like
+  // progress and means nothing.
   let qeiTrend = null;
+  let qeiTrendSuppressed = null;
   if (prevScan) {
     const prevHasStored = typeof prevScan.qei === 'number';
-    const qeiPrev = prevHasStored ? prevScan.qei : estimateLegacyQEI(prevScan);
-    qeiTrend = qei - qeiPrev;
+    const prevVersion = prevHasStored ? prevScan.qeiMethodVersion : 0;
+    const prevMax = prevScan.qeiMax || 100;
+    if (prevVersion !== qeiMethodVersion) {
+      qeiTrendSuppressed = `previous scan scored under methodology v${prevVersion}, this one under v${qeiMethodVersion}`;
+    } else if (prevMax !== qeiMax) {
+      qeiTrendSuppressed = `previous scan scored out of ${prevMax}, this one out of ${qeiMax}`;
+    } else {
+      qeiTrend = qei - prevScan.qei;
+    }
   }
 
   // Asset inventory breakdown — independent of QEI, still needs the stored
@@ -308,8 +307,11 @@ function getBoardMetrics(domain, tenantId = DEFAULT_TENANT) {
     lastScanAt: latestScan.timestamp,
     totalScans: store.scans.length,
     quantumExposureIndex: qei,
+    quantumExposureMax: qeiMax,          // 80 when retention is unknown, 100 when supplied
+    quantumExposureComplete: qeiComplete,
     quantumExposureTrend: qeiTrend,
-    qeiMethodVersion, // 0 = legacy pre-consolidation estimate; see computeQEI/estimateLegacyQEI
+    quantumExposureTrendSuppressed: qeiTrendSuppressed,
+    qeiMethodVersion, // 0 = legacy pre-consolidation estimate; see estimateLegacyQEI
     assetInventory: {
       total:          latestScan.hostsProbed    || 0,
       pqNone:         pb.none    || 0,

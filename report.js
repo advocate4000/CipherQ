@@ -1,3 +1,16 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   RETIRED — superseded by the Quantum Exposure Assessment
+
+   This built the old QTA document: executive summary, findings by severity,
+   impact/ease matrix, roadmap, control mapping. POST /api/report now builds
+   the QEA instead (qea-doc.js), which classifies exposures by threat model
+   rather than severity, decomposes every index point into an observation,
+   and refuses to render while any client-attested field is unset.
+
+   Nothing requires this file. It is kept only so the previous format can be
+   consulted; delete it once you are satisfied you no longer need it.
+   ═══════════════════════════════════════════════════════════════════════ */
+
 'use strict';
 
 /**
