@@ -25,28 +25,26 @@ package is regenerated and correct.
 
 ---
 
-## First report will return 409. That is the gate, not a fault.
+## The first report opens a form. That is the gate, not a fault.
 
 The QEA report puts a number, a cost and a recommendation in front of a board,
-so it will not build until it has the inputs no scanner can observe. The 409
-names every missing field and why it matters.
+so it will not build until it has the inputs no scanner can observe.
 
-```bash
-node set-profile.js cipherq.co                          # what is missing
-node set-profile.js cipherq.co profile-template.json    # send it
-```
+**Click Download Report and fill in the dialog that appears.** It lists exactly
+the fields the server asked for, grouped, each with the reason it matters,
+pre-filled from anything already stored. Save writes them back and the report
+builds automatically. Asked once per domain.
 
-Edit `profile-template.json`, run again, repeat until it says complete. Add
-`--url https://your-host` if the server is not on localhost:3000.
+Nothing to run in a terminal. The fields come from the server's own reply, so
+the form cannot drift from what the report actually requires.
 
-A value starting with **`TODO`** counts as unset, so you can send the template
-immediately and it will accept what is real while still asking for the rest. A
-placeholder can never print in a delivered report as though it were an answer.
+Of the 24, about eight are real judgement calls: `data_retention_years` (worth
+20 index points and it sets the exposure window), `authorisation`, the rate
+card, and the six board narrative fields. They are yours to state.
 
-Of the 24 fields, about eight are genuinely judgement calls: `data_retention_years`
-(worth 20 index points and it sets the exposure window), `authorisation`, the
-rate card, and the six `board.*` fields. Those are left as TODO deliberately —
-they are yours to state, not mine to invent.
+`set-profile.js` and `profile-template.json` are still in the package if you
+prefer scripting it — `node set-profile.js <domain> profile-template.json
+--url https://your-host` — but you should not need them.
 
 ---
 
