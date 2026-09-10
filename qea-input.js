@@ -339,6 +339,12 @@ function buildInput(scan, httpData, profile = {}, networkData = null) {
     },
     assessment: {
       qei: scored.qei,
+      /* The denominator is not always 100: qei.js drops unassessed dimensions
+         from it rather than scoring them zero, so an estate with no network
+         scan is scored out of 85. Carrying it through is what stops the report
+         understating an estate it only partly measured. */
+      qei_max: scored.qeiMax,
+      complete: scored.complete,
       band: scored.band,
       crqc_estimate: CRQC_YEAR,
       assessment_year: assessmentYear,

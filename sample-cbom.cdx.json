@@ -1,0 +1,894 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "serialNumber": "urn:uuid:1a89c735-8906-4581-8711-2d5985896a9d",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-09-09T17:11:44.504Z",
+    "tools": [
+      {
+        "vendor": "CipherQ",
+        "name": "CipherQ PQC Scanner",
+        "version": "1.0",
+        "externalReferences": [
+          {
+            "type": "website",
+            "url": "https://cipherq.onrender.com"
+          }
+        ]
+      }
+    ],
+    "component": {
+      "type": "library",
+      "name": "example-utility.com",
+      "description": "Post-Quantum Cryptographic Bill of Materials for example-utility.com",
+      "properties": [
+        {
+          "name": "cipherq:scanTime",
+          "value": "2026-09-09T17:11:42.973Z"
+        },
+        {
+          "name": "cipherq:hostsProbed",
+          "value": "12"
+        },
+        {
+          "name": "cipherq:hostsReachable",
+          "value": "5"
+        },
+        {
+          "name": "cipherq:overallHndlRisk",
+          "value": "high-likely"
+        },
+        {
+          "name": "cipherq:sensitivityProfile",
+          "value": "general"
+        },
+        {
+          "name": "cipherq:nistFips203",
+          "value": "assessed"
+        },
+        {
+          "name": "cipherq:nistFips204",
+          "value": "assessed"
+        },
+        {
+          "name": "cipherq:ietfDraft",
+          "value": "draft-ietf-tls-ecdhe-mlkem-05"
+        },
+        {
+          "name": "cipherq:threatAxes",
+          "value": "HNDL, TNFL, DNEL"
+        },
+        {
+          "name": "cipherq:dnelIndex",
+          "value": "62"
+        },
+        {
+          "name": "cipherq:dnelBand",
+          "value": "HIGH"
+        },
+        {
+          "name": "cipherq:dnelSurfaceHosts",
+          "value": "5"
+        },
+        {
+          "name": "cipherq:dnelHostsConsidered",
+          "value": "6"
+        },
+        {
+          "name": "cipherq:dnelSurfaceClasses",
+          "value": "OT / ICS control (2); Directory & authentication (1); Remote administration (3); VPN & tunnel concentrators (1)"
+        },
+        {
+          "name": "cipherq:dnelSshScanned",
+          "value": "3"
+        },
+        {
+          "name": "cipherq:dnelSshClassicalKex",
+          "value": "3"
+        },
+        {
+          "name": "cipherq:dnelConfidence",
+          "value": "observed"
+        },
+        {
+          "name": "cipherq:dnelSource",
+          "value": "client"
+        },
+        {
+          "name": "cipherq:dnelNetworkScanRun",
+          "value": "true"
+        },
+        {
+          "name": "cipherq:dnelNotYetObservable",
+          "value": "Crypto-agility constraint per asset; Identity provider signing posture; Client certificate / mTLS requirement"
+        }
+      ]
+    }
+  },
+  "components": [
+    {
+      "type": "cryptographic-asset",
+      "bom-ref": "tls:scada-gw.example-utility.com",
+      "name": "scada-gw.example-utility.com",
+      "version": "TLSv1.2",
+      "cryptoProperties": {
+        "assetType": "protocol",
+        "protocolProperties": {
+          "type": "tls",
+          "version": "1.2",
+          "cipherSuites": [
+            {
+              "name": "TLS_AES_256_GCM_SHA384",
+              "algorithms": [
+                "ecdhe",
+                "ECDSA-SHA256"
+              ]
+            }
+          ]
+        }
+      },
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://scada-gw.example-utility.com"
+        }
+      ],
+      "properties": [
+        {
+          "name": "cipherq:pqReadiness",
+          "value": "none"
+        },
+        {
+          "name": "cipherq:hndlRisk",
+          "value": "high-likely"
+        },
+        {
+          "name": "cipherq:caName",
+          "value": "Internal Utility CA"
+        },
+        {
+          "name": "cipherq:certDaysToExpiry",
+          "value": "2821"
+        },
+        {
+          "name": "cipherq:kexAlgorithm",
+          "value": "unknown"
+        },
+        {
+          "name": "cipherq:certSigAlgorithm",
+          "value": "ECDSA-SHA256"
+        },
+        {
+          "name": "cipherq:certSigPqStatus",
+          "value": "quantum-vulnerable"
+        },
+        {
+          "name": "cipherq:tnflRisk",
+          "value": "high"
+        },
+        {
+          "name": "cipherq:sensitivityProfile",
+          "value": "general"
+        }
+      ]
+    },
+    {
+      "type": "cryptographic-asset",
+      "bom-ref": "tls:bastion.example-utility.com",
+      "name": "bastion.example-utility.com",
+      "version": "TLSv1.3",
+      "cryptoProperties": {
+        "assetType": "protocol",
+        "protocolProperties": {
+          "type": "tls",
+          "version": "1.3",
+          "cipherSuites": [
+            {
+              "name": "TLS_AES_256_GCM_SHA384",
+              "algorithms": [
+                "X25519",
+                "ECDSA-SHA256"
+              ]
+            }
+          ]
+        }
+      },
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://bastion.example-utility.com"
+        }
+      ],
+      "properties": [
+        {
+          "name": "cipherq:pqReadiness",
+          "value": "none"
+        },
+        {
+          "name": "cipherq:hndlRisk",
+          "value": "high-likely"
+        },
+        {
+          "name": "cipherq:caName",
+          "value": "Let's Encrypt"
+        },
+        {
+          "name": "cipherq:certDaysToExpiry",
+          "value": "70"
+        },
+        {
+          "name": "cipherq:kexAlgorithm",
+          "value": "X25519"
+        },
+        {
+          "name": "cipherq:certSigAlgorithm",
+          "value": "ECDSA-SHA256"
+        },
+        {
+          "name": "cipherq:certSigPqStatus",
+          "value": "quantum-vulnerable"
+        },
+        {
+          "name": "cipherq:tnflRisk",
+          "value": "high"
+        },
+        {
+          "name": "cipherq:sensitivityProfile",
+          "value": "general"
+        }
+      ]
+    },
+    {
+      "type": "cryptographic-asset",
+      "bom-ref": "tls:ad.example-utility.com",
+      "name": "ad.example-utility.com",
+      "version": "TLSv1.2",
+      "cryptoProperties": {
+        "assetType": "protocol",
+        "protocolProperties": {
+          "type": "tls",
+          "version": "1.2",
+          "cipherSuites": [
+            {
+              "name": "TLS_AES_256_GCM_SHA384",
+              "algorithms": [
+                "ecdhe",
+                "ECDSA-SHA256"
+              ]
+            }
+          ]
+        }
+      },
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://ad.example-utility.com"
+        }
+      ],
+      "properties": [
+        {
+          "name": "cipherq:pqReadiness",
+          "value": "none"
+        },
+        {
+          "name": "cipherq:hndlRisk",
+          "value": "high-likely"
+        },
+        {
+          "name": "cipherq:caName",
+          "value": "Internal Utility CA"
+        },
+        {
+          "name": "cipherq:certDaysToExpiry",
+          "value": "1725"
+        },
+        {
+          "name": "cipherq:kexAlgorithm",
+          "value": "unknown"
+        },
+        {
+          "name": "cipherq:certSigAlgorithm",
+          "value": "ECDSA-SHA256"
+        },
+        {
+          "name": "cipherq:certSigPqStatus",
+          "value": "quantum-vulnerable"
+        },
+        {
+          "name": "cipherq:tnflRisk",
+          "value": "high"
+        },
+        {
+          "name": "cipherq:sensitivityProfile",
+          "value": "general"
+        }
+      ]
+    },
+    {
+      "type": "cryptographic-asset",
+      "bom-ref": "tls:vpn.example-utility.com",
+      "name": "vpn.example-utility.com",
+      "version": "TLSv1.3",
+      "cryptoProperties": {
+        "assetType": "protocol",
+        "protocolProperties": {
+          "type": "tls",
+          "version": "1.3",
+          "cipherSuites": [
+            {
+              "name": "TLS_AES_256_GCM_SHA384",
+              "algorithms": [
+                "X25519",
+                "ECDSA-SHA256"
+              ]
+            }
+          ]
+        }
+      },
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://vpn.example-utility.com"
+        }
+      ],
+      "properties": [
+        {
+          "name": "cipherq:pqReadiness",
+          "value": "none"
+        },
+        {
+          "name": "cipherq:hndlRisk",
+          "value": "high-likely"
+        },
+        {
+          "name": "cipherq:caName",
+          "value": "DigiCert"
+        },
+        {
+          "name": "cipherq:certDaysToExpiry",
+          "value": "70"
+        },
+        {
+          "name": "cipherq:kexAlgorithm",
+          "value": "X25519"
+        },
+        {
+          "name": "cipherq:certSigAlgorithm",
+          "value": "ECDSA-SHA256"
+        },
+        {
+          "name": "cipherq:certSigPqStatus",
+          "value": "quantum-vulnerable"
+        },
+        {
+          "name": "cipherq:tnflRisk",
+          "value": "high"
+        },
+        {
+          "name": "cipherq:sensitivityProfile",
+          "value": "general"
+        }
+      ]
+    },
+    {
+      "type": "cryptographic-asset",
+      "bom-ref": "tls:www.example-utility.com",
+      "name": "www.example-utility.com",
+      "version": "TLSv1.3",
+      "cryptoProperties": {
+        "assetType": "protocol",
+        "protocolProperties": {
+          "type": "tls",
+          "version": "1.3",
+          "cipherSuites": [
+            {
+              "name": "TLS_AES_256_GCM_SHA384",
+              "algorithms": [
+                "X25519",
+                "ECDSA-SHA256"
+              ]
+            }
+          ]
+        }
+      },
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://www.example-utility.com"
+        }
+      ],
+      "properties": [
+        {
+          "name": "cipherq:pqReadiness",
+          "value": "none"
+        },
+        {
+          "name": "cipherq:hndlRisk",
+          "value": "high-likely"
+        },
+        {
+          "name": "cipherq:caName",
+          "value": "Let's Encrypt"
+        },
+        {
+          "name": "cipherq:certDaysToExpiry",
+          "value": "70"
+        },
+        {
+          "name": "cipherq:kexAlgorithm",
+          "value": "X25519"
+        },
+        {
+          "name": "cipherq:certSigAlgorithm",
+          "value": "ECDSA-SHA256"
+        },
+        {
+          "name": "cipherq:certSigPqStatus",
+          "value": "quantum-vulnerable"
+        },
+        {
+          "name": "cipherq:tnflRisk",
+          "value": "high"
+        },
+        {
+          "name": "cipherq:sensitivityProfile",
+          "value": "general"
+        }
+      ]
+    },
+    {
+      "type": "cryptographic-asset",
+      "bom-ref": "dnel:scada-gw.example-utility.com",
+      "name": "scada-gw.example-utility.com — operator access",
+      "cryptoProperties": {
+        "assetType": "related-crypto-material",
+        "relatedCryptoMaterialProperties": {
+          "type": "credential",
+          "state": "active"
+        }
+      },
+      "properties": [
+        {
+          "name": "cipherq:threatAxis",
+          "value": "DNEL"
+        },
+        {
+          "name": "cipherq:dnelScore",
+          "value": "64"
+        },
+        {
+          "name": "cipherq:dnelBand",
+          "value": "HIGH"
+        },
+        {
+          "name": "cipherq:operatorSurfaces",
+          "value": "OT / ICS control, Remote administration"
+        },
+        {
+          "name": "cipherq:operatorPorts",
+          "value": "502, 20000, 22"
+        },
+        {
+          "name": "cipherq:evidence",
+          "value": "observed"
+        }
+      ]
+    },
+    {
+      "type": "cryptographic-asset",
+      "bom-ref": "dnel:bastion.example-utility.com",
+      "name": "bastion.example-utility.com — operator access",
+      "cryptoProperties": {
+        "assetType": "related-crypto-material",
+        "relatedCryptoMaterialProperties": {
+          "type": "credential",
+          "state": "active"
+        }
+      },
+      "properties": [
+        {
+          "name": "cipherq:threatAxis",
+          "value": "DNEL"
+        },
+        {
+          "name": "cipherq:dnelScore",
+          "value": "34"
+        },
+        {
+          "name": "cipherq:dnelBand",
+          "value": "ELEVATED"
+        },
+        {
+          "name": "cipherq:operatorSurfaces",
+          "value": "Remote administration"
+        },
+        {
+          "name": "cipherq:operatorPorts",
+          "value": "22, 3389"
+        },
+        {
+          "name": "cipherq:evidence",
+          "value": "observed"
+        }
+      ]
+    },
+    {
+      "type": "cryptographic-asset",
+      "bom-ref": "dnel:ad.example-utility.com",
+      "name": "ad.example-utility.com — operator access",
+      "cryptoProperties": {
+        "assetType": "related-crypto-material",
+        "relatedCryptoMaterialProperties": {
+          "type": "credential",
+          "state": "active"
+        }
+      },
+      "properties": [
+        {
+          "name": "cipherq:threatAxis",
+          "value": "DNEL"
+        },
+        {
+          "name": "cipherq:dnelScore",
+          "value": "50"
+        },
+        {
+          "name": "cipherq:dnelBand",
+          "value": "HIGH"
+        },
+        {
+          "name": "cipherq:operatorSurfaces",
+          "value": "Directory & authentication"
+        },
+        {
+          "name": "cipherq:operatorPorts",
+          "value": "88, 389, 636"
+        },
+        {
+          "name": "cipherq:evidence",
+          "value": "observed"
+        }
+      ]
+    },
+    {
+      "type": "cryptographic-asset",
+      "bom-ref": "dnel:vpn.example-utility.com",
+      "name": "vpn.example-utility.com — operator access",
+      "cryptoProperties": {
+        "assetType": "related-crypto-material",
+        "relatedCryptoMaterialProperties": {
+          "type": "credential",
+          "state": "active"
+        }
+      },
+      "properties": [
+        {
+          "name": "cipherq:threatAxis",
+          "value": "DNEL"
+        },
+        {
+          "name": "cipherq:dnelScore",
+          "value": "27"
+        },
+        {
+          "name": "cipherq:dnelBand",
+          "value": "LOW"
+        },
+        {
+          "name": "cipherq:operatorSurfaces",
+          "value": "VPN & tunnel concentrators"
+        },
+        {
+          "name": "cipherq:operatorPorts",
+          "value": "500, 4500"
+        },
+        {
+          "name": "cipherq:evidence",
+          "value": "observed"
+        }
+      ]
+    },
+    {
+      "type": "cryptographic-asset",
+      "bom-ref": "dnel:legacy-rtu.example-utility.com",
+      "name": "legacy-rtu.example-utility.com — operator access",
+      "cryptoProperties": {
+        "assetType": "related-crypto-material",
+        "relatedCryptoMaterialProperties": {
+          "type": "credential",
+          "state": "active"
+        }
+      },
+      "properties": [
+        {
+          "name": "cipherq:threatAxis",
+          "value": "DNEL"
+        },
+        {
+          "name": "cipherq:dnelScore",
+          "value": "71"
+        },
+        {
+          "name": "cipherq:dnelBand",
+          "value": "CRITICAL"
+        },
+        {
+          "name": "cipherq:operatorSurfaces",
+          "value": "Remote administration, OT / ICS control"
+        },
+        {
+          "name": "cipherq:operatorPorts",
+          "value": "23, 102"
+        },
+        {
+          "name": "cipherq:evidence",
+          "value": "observed"
+        }
+      ]
+    },
+    {
+      "type": "cryptographic-asset",
+      "bom-ref": "dns:legacy-rtu.example-utility.com",
+      "name": "legacy-rtu.example-utility.com",
+      "cryptoProperties": {
+        "assetType": "related-crypto-material"
+      },
+      "properties": [
+        {
+          "name": "cipherq:dnsOnly",
+          "value": "true"
+        },
+        {
+          "name": "cipherq:pqReadiness",
+          "value": "none"
+        }
+      ]
+    }
+  ],
+  "vulnerabilities": [
+    {
+      "id": "KEX-PQ-STATUS-UNKNOWN",
+      "source": {
+        "name": "CipherQ PQC Scanner",
+        "url": "https://cipherq.onrender.com"
+      },
+      "ratings": [
+        {
+          "source": {
+            "name": "CipherQ"
+          },
+          "severity": "high",
+          "method": "other"
+        }
+      ],
+      "description": "No hybrid PQ key exchange",
+      "detail": "x",
+      "recommendation": "y",
+      "affects": [
+        {
+          "ref": "tls:www.example-utility.com"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nistRef",
+          "value": "FIPS 203"
+        },
+        {
+          "name": "priority",
+          "value": "P1"
+        }
+      ]
+    },
+    {
+      "id": "DNEL-OT-ICS-EXPOSED",
+      "source": {
+        "name": "CipherQ PQC Scanner",
+        "url": "https://cipherq.onrender.com"
+      },
+      "ratings": [
+        {
+          "source": {
+            "name": "CipherQ"
+          },
+          "severity": "critical",
+          "method": "other"
+        }
+      ],
+      "description": "OT / ICS control reachable on 2 hosts",
+      "detail": "Process control reachable from outside. Replacement cycles of 10–30 years mean this is the asset class least able to be re-keyed before a CRQC exists. An adversary holding recovered authentication material for this surface does not breach anything — they authenticate. The session is well-formed, the credential is genuine, and the audit trail records a legitimate operator.",
+      "recommendation": "Remove direct internet reachability and place behind an authenticated, PQ-capable gateway. Record the crypto-agility constraint per device: equipment that is certification- or hardware-locked cannot be remediated by patching and must be scheduled as replacement.",
+      "affects": [
+        {
+          "ref": "dnel:scada-gw.example-utility.com"
+        },
+        {
+          "ref": "dnel:legacy-rtu.example-utility.com"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nistRef",
+          "value": "FIPS 203 (ML-KEM) · CNSA 2.0"
+        },
+        {
+          "name": "priority",
+          "value": "P1"
+        }
+      ]
+    },
+    {
+      "id": "DNEL-DIRECTORY-AUTH-EXPOSED",
+      "source": {
+        "name": "CipherQ PQC Scanner",
+        "url": "https://cipherq.onrender.com"
+      },
+      "ratings": [
+        {
+          "source": {
+            "name": "CipherQ"
+          },
+          "severity": "critical",
+          "method": "other"
+        }
+      ],
+      "description": "Directory & authentication reachable on 1 host",
+      "detail": "The credential issuer itself. Compromise here is estate-wide rather than host-local. An adversary holding recovered authentication material for this surface does not breach anything — they authenticate. The session is well-formed, the credential is genuine, and the audit trail records a legitimate operator.",
+      "recommendation": "Enable hybrid post-quantum key establishment on this surface, shorten credential lifetimes so that harvested material expires inside the migration window, and require re-issue rather than renewal at the next rotation.",
+      "affects": [
+        {
+          "ref": "dnel:ad.example-utility.com"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nistRef",
+          "value": "FIPS 203 (ML-KEM) · CNSA 2.0"
+        },
+        {
+          "name": "priority",
+          "value": "P2"
+        }
+      ]
+    },
+    {
+      "id": "DNEL-REMOTE-ADMIN-EXPOSED",
+      "source": {
+        "name": "CipherQ PQC Scanner",
+        "url": "https://cipherq.onrender.com"
+      },
+      "ratings": [
+        {
+          "source": {
+            "name": "CipherQ"
+          },
+          "severity": "high",
+          "method": "other"
+        }
+      ],
+      "description": "Remote administration reachable on 3 hosts",
+      "detail": "Direct interactive operator access. The canonical DNEL entry point. An adversary holding recovered authentication material for this surface does not breach anything — they authenticate. The session is well-formed, the credential is genuine, and the audit trail records a legitimate operator.",
+      "recommendation": "Enable hybrid post-quantum key establishment on this surface, shorten credential lifetimes so that harvested material expires inside the migration window, and require re-issue rather than renewal at the next rotation.",
+      "affects": [
+        {
+          "ref": "dnel:scada-gw.example-utility.com"
+        },
+        {
+          "ref": "dnel:bastion.example-utility.com"
+        },
+        {
+          "ref": "dnel:legacy-rtu.example-utility.com"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nistRef",
+          "value": "FIPS 203 (ML-KEM) · CNSA 2.0"
+        },
+        {
+          "name": "priority",
+          "value": "P2"
+        }
+      ]
+    },
+    {
+      "id": "DNEL-VPN-TUNNEL-EXPOSED",
+      "source": {
+        "name": "CipherQ PQC Scanner",
+        "url": "https://cipherq.onrender.com"
+      },
+      "ratings": [
+        {
+          "source": {
+            "name": "CipherQ"
+          },
+          "severity": "high",
+          "method": "other"
+        }
+      ],
+      "description": "VPN & tunnel concentrators reachable on 1 host",
+      "detail": "Grants network position, not just host access. Handshakes recorded today yield the session keys later. An adversary holding recovered authentication material for this surface does not breach anything — they authenticate. The session is well-formed, the credential is genuine, and the audit trail records a legitimate operator.",
+      "recommendation": "Enable hybrid post-quantum key establishment on this surface, shorten credential lifetimes so that harvested material expires inside the migration window, and require re-issue rather than renewal at the next rotation.",
+      "affects": [
+        {
+          "ref": "dnel:vpn.example-utility.com"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nistRef",
+          "value": "FIPS 203 (ML-KEM) · CNSA 2.0"
+        },
+        {
+          "name": "priority",
+          "value": "P2"
+        }
+      ]
+    },
+    {
+      "id": "DNEL-CLEARTEXT-ADMIN",
+      "source": {
+        "name": "CipherQ PQC Scanner",
+        "url": "https://cipherq.onrender.com"
+      },
+      "ratings": [
+        {
+          "source": {
+            "name": "CipherQ"
+          },
+          "severity": "critical",
+          "method": "other"
+        }
+      ],
+      "description": "Cleartext administration protocol exposed",
+      "detail": "Operator credentials traverse this service unencrypted. This is a DNEL exposure that needs no quantum computer at all — the credential is harvestable today and will still authenticate whenever it is used.",
+      "recommendation": "Disable the service and rotate every credential that has traversed it.",
+      "affects": [
+        {
+          "ref": "dnel:legacy-rtu.example-utility.com"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nistRef",
+          "value": "CNSA 2.0"
+        },
+        {
+          "name": "priority",
+          "value": "P1"
+        }
+      ]
+    },
+    {
+      "id": "DNEL-SSH-CLASSICAL-KEX",
+      "source": {
+        "name": "CipherQ PQC Scanner",
+        "url": "https://cipherq.onrender.com"
+      },
+      "ratings": [
+        {
+          "source": {
+            "name": "CipherQ"
+          },
+          "severity": "high",
+          "method": "other"
+        }
+      ],
+      "description": "3 of 3 SSH hosts negotiate classical key exchange",
+      "detail": "SSH is the operator plane. A recorded classical handshake yields the session keys once a CRQC exists, and with them the authentication exchange inside that session. Host keys and authorised user keys are long-lived by convention, so the exposure persists across the whole harvest window rather than expiring with the session.",
+      "recommendation": "Enable mlkem768x25519-sha256 hybrid key exchange (OpenSSH 9.9+), then rotate host keys and re-issue user keys so that pre-migration material stops being accepted.",
+      "affects": [],
+      "properties": [
+        {
+          "name": "nistRef",
+          "value": "FIPS 203 (ML-KEM)"
+        },
+        {
+          "name": "priority",
+          "value": "P1"
+        }
+      ]
+    }
+  ]
+}

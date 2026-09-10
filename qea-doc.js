@@ -213,7 +213,7 @@ async function build(scan, opts = {}) {
       cell(c.date_issued,      { width: 2340, size: 18 }),
       cell(c.classification,   { width: 2340, size: 18 }),
       cell(a.authorisation,    { width: 2340, size: 16, mono: true }),
-      cell(`${a.qei} / 100`,   { width: 2340, size: 22, bold: true, color: bandTone }),
+      cell(`${a.qei} / ${a.qei_max || 100}`,   { width: 2340, size: 22, bold: true, color: bandTone }),
     ]}),
   ]));
 
@@ -358,7 +358,7 @@ async function build(scan, opts = {}) {
     ]})),
     new TableRow({ children: [
       cell('Quantum Exposure Index', { width: cw[0], bold: true, caps: true, size: 15 }),
-      cell(`${a.qei} / 100`, { width: cw[1], bold: true, size: 20, color: bandTone, mono: true }),
+      cell(`${a.qei} / ${a.qei_max || 100}`, { width: cw[1], bold: true, size: 20, color: bandTone, mono: true }),
       cell(`Band: ${a.band}`, { width: cw[2], bold: true }),
     ]}),
   ]));
@@ -638,7 +638,7 @@ async function build(scan, opts = {}) {
       ['CRQC', 'Cryptographically relevant quantum computer. Sufficient stable logical qubits to run Shor\'s algorithm against production key sizes. The 2033 figure is an estimate and is configurable.'],
       ['Hybrid key establishment', 'A construction combining classical and post-quantum mechanisms, such as X25519MLKEM768. Security holds if either component holds, so deployment carries no reduction in classical security.'],
       ['ML-KEM', 'Module-Lattice Key Encapsulation Mechanism, NIST FIPS 203.'],
-      ['Quantum Exposure Index', 'CipherQ\'s composite score, 0–100, across six weighted dimensions. Every point is attributable to an observation or a rule.'],
+      ['Quantum Exposure Index', 'CipherQ\'s composite score across seven weighted dimensions. Dimensions that could not be assessed are removed from the denominator rather than scored zero, so the maximum shown is not always 100. Every point is attributable to an observation or a rule.'],
     ].map(([k, v]) => new TableRow({ children: [
       cell(k, { width: dw[0], bold: true, size: 17 }),
       cell(v, { width: dw[1], size: 17 }),

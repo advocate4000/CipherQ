@@ -1,20 +1,29 @@
 {
   "name": "cipherq-pqc-scanner",
   "version": "2.2.0",
-  "description": "Full-spectrum PQC domain scanner \u2014 TLS, DNS, HTTP, network, vendor, CBOM",
+  "description": "Full-spectrum PQC domain scanner — TLS, DNS, HTTP, network, vendor, CBOM",
   "main": "scanner.js",
   "scripts": {
     "start": "node server.js",
-    "lint": "node --check server.js scanner.js dns-security.js http-security.js network-security.js ssrf-guard.js cbom.js dnel.js vendor.js internal-scanner.js qei.js qea-doc.js qea-input.js report-profile.js"
+    "lint": "node --check server.js scanner.js dns-security.js http-security.js network-security.js ssrf-guard.js cbom.js dnel.js vendor.js internal-scanner.js qei.js qea-doc.js qea-input.js report-profile.js",
+    "test": "node test-dnel.js && node build-test.js",
+    "preflight": "node preflight.js",
+    "validate-cbom": "node validate-cbom.js",
+    "patch-server": "node apply-server-patch.js"
   },
   "dependencies": {
-    "express": "^4.19.2",
-    "docx": "^9.7.1",
     "adm-zip": "^0.5.10",
-    "helmet": "^7.1.0",
-    "express-rate-limit": "^7.3.1"
+    "docx": "^9.7.1",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.3.1",
+    "helmet": "^7.1.0"
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@cyclonedx/cyclonedx-library": "^10.2.0",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1"
   }
 }
