@@ -20,6 +20,8 @@ const { assertScannable } = require('./ssrf-guard');
 const { persistScan, getBoardMetrics, listVendors }   = require('./cbom');
 const { startVendorAssessment, getVendorJob }         = require('./vendor');
 const { runCodeScan, runPKIScan }                     = require('./internal-scanner');
+const qeaRoute      = require('./qea-route');
+const reportProfile = require('./report-profile');
 
 const app = express();
 
@@ -309,6 +311,14 @@ app.post('/api/network-scan', scanLimiter, async (req, res) => {
       scanNetworkSecurity(domain, hosts),
       new Promise((_, r) => setTimeout(() => r(new Error('Network scan timed out after 90s')), 90000)),
     ]);
+
+    /* Operator surfaces are derived from open ports, so DNEL is assessed here
+       and travels on the response. The report does not depend on this — it
+       computes DNEL from the raw scan — but the UI and the CycloneDX export
+       read this block rather than recomputing, which keeps one scorer behind
+       one concept. `hosts` carries the TLS blocks the assessment needs. */
+    qeaRoute.attachDNEL(result, hosts);
+
     res.json(result);
   } catch (e) {
     console.error('Network scan error:', e.message);
@@ -324,32 +334,86 @@ app.post('/api/network-scan', scanLimiter, async (req, res) => {
 
 // ─── POST /api/report ─────────────────────────────────────────────────────────
 
+/* The QEA report (qea-doc.js), not the legacy generator (report.js).
+ *
+ * The two produce different documents from different inputs, and a route able
+ * to emit either is how an estate ends up with two reports that disagree — so
+ * the choice is made here, once. report.js is now unreferenced; keep it only as
+ * long as you need the old format for comparison.
+ *
+ * The handler owns the 409 profile gate, validation, the filename and the error
+ * shapes. Everything the frontend already expects is preserved: reportLimiter,
+ * the `scanResult || body` fallback, and the 400 on a missing summary.
+ *
+ * dnsData, boardMetrics, codeData, pkiData and vendorData are still accepted —
+ * the frontend sends them — but the QEA renderer does not read them. They are
+ * left off the call rather than passed and ignored. */
 app.post('/api/report', reportLimiter, async (req, res) => {
-  const scan         = req.body.scanResult  || req.body;
-  const dnsData      = req.body.dnsData     || null;
-  const httpData     = req.body.httpData    || null;
-  const networkData  = req.body.networkData || null;
-  const boardMetrics = req.body.boardMetrics || null;
-  const codeData     = req.body.codeData    || null;
-  const pkiData      = req.body.pkiData     || null;
-  const vendorData   = req.body.vendorData  || null;
+  const scan        = req.body.scanResult  || req.body;
+  const httpData    = req.body.httpData    || null;
+  const networkData = req.body.networkData || null;
 
   if (!scan || !scan.summary) {
     return res.status(400).json({ error: 'Valid scan result required in request body.' });
   }
 
-  try {
-    const { generateReport } = require('./report');
-    const buffer   = await generateReport(scan, dnsData, httpData, networkData, boardMetrics, codeData, pkiData, vendorData);
-    const domain   = scan.summary.domain.replace(/[^a-zA-Z0-9.\-]/g, '_');
-    const date     = new Date().toISOString().slice(0, 10);
-    const filename = `CipherQ_QTA_${domain}_${date}.docx`;
+  return qeaRoute.handler({
+    reportProfile,
+    loadProfile: (domain) => reportProfile.read(domain),
+    log: (level, msg, meta) =>
+      console[level === 'error' ? 'error' : 'log'](`[CipherQ] ${msg}`, meta || ''),
+  })({ body: { scanResult: scan, httpData, networkData, domain: scan.summary.domain } }, res);
+});
 
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.send(buffer);
+// ─── GET / PUT /api/report/profile/:domain ────────────────────────────────────
+//
+// The report gate returns 409 naming the fields it still needs, and the
+// frontend tells the user to set them here. Without these routes that
+// instruction hit the static handler and 404'd, so the gate was unactionable.
+//
+// PUT merges rather than replaces — a caller correcting one rate should not
+// have to resend the board narrative, and a PUT that silently blanked the
+// retention figure would be the worst failure mode available here.
+
+app.get('/api/report/profile/:domain', (req, res) => {
+  const domain = req.params.domain;
+  if (!validateDomain(domain, res)) return;
+
+  try {
+    const profile = reportProfile.read(domain);
+    res.json({
+      domain,
+      profile,
+      missing: reportProfile.missing(profile),
+      complete: reportProfile.isComplete(profile),
+    });
   } catch (e) {
-    console.error('Report generation error:', e);
+    console.error('Report profile read error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.put('/api/report/profile/:domain', (req, res) => {
+  const domain = req.params.domain;
+  if (!validateDomain(domain, res)) return;
+
+  const patch = req.body;
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+    return res.status(400).json({ error: 'Request body must be an object of profile fields.' });
+  }
+
+  try {
+    const profile = reportProfile.write(domain, patch);
+    const missing = reportProfile.missing(profile);
+    res.json({
+      ok: true,
+      domain,
+      profile,
+      missing,
+      complete: missing.length === 0,
+    });
+  } catch (e) {
+    console.error('Report profile write error:', e);
     res.status(500).json({ error: e.message });
   }
 });
@@ -491,6 +555,7 @@ app.listen(PORT, () => {
   console.log(`[CipherQ] SSRF guard: active`);
   console.log(`[CipherQ] Rate limiting: 20 scans / 15 min per IP`);
   console.log(`[CipherQ] Job TTL cleanup: every 60 s (15 min TTL)`);
+  console.log(`[CipherQ] Report generator: qea-doc (QEA, method v${require('./qei').METHOD_VERSION}) — three-axis, DNEL enabled`);
 });
 
 module.exports = app;
