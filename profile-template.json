@@ -1,0 +1,59 @@
+{
+  "_README": [
+    "Report profile. These are the judgements a scan cannot make, so the report",
+    "gate asks for them once per domain rather than inventing them.",
+    "",
+    "Fields beginning 'TODO' count as unset — the gate will keep naming them.",
+    "That is deliberate: a placeholder must never print in a delivered report as",
+    "though it were fact. Replace each TODO with a real answer, or delete the",
+    "field and let the gate remind you.",
+    "",
+    "Send it with:   node set-profile.js cipherq.co profile-template.json",
+    "Underscore keys are ignored by the report."
+  ],
+
+  "name": "CipherQ",
+  "sector": "Technology",
+
+  "_data_retention_years": "How long YOU must keep this data confidential. Worth 20 index points and it sets the whole exposure window. Get it in writing from the client — a sector typical is not an attested obligation.",
+  "data_retention_years": "TODO — a number, e.g. 7",
+
+  "_retention_basis": "The obligation behind that period, in the client's own words.",
+  "retention_basis": "TODO — e.g. 'Customer records retained 7 years under UK statutory accounting requirements'",
+
+  "regulations": ["UK GDPR", "NIS2"],
+
+  "_authorisation": "Your written authorisation reference. Active probing without recorded authority is an offence under the Computer Misuse Act 1990, and there is no research defence. Scanning your own domain still wants a reference you can point at.",
+  "authorisation": "TODO — e.g. 'Self-assessment, internal authorisation CQ-2026-001'",
+
+  "_residual_explanation": "Why the modelled index does not reach zero. Usually because some component of it — reachable host count, say — is not something the programme reduces.",
+  "residual_explanation": "TODO — e.g. 'Residual index reflects reachable-host count, which the programme does not reduce.'",
+
+  "owners": {
+    "security": "TODO — team owning the key-establishment track",
+    "operations": "TODO — team owning the hygiene track"
+  },
+
+  "_rate_card": "Your rates, in whole currency units. access_low/high are required only when the scan found a reachable operator surface — omit them otherwise and the gate will not ask.",
+  "rate_card": {
+    "kex_low": 0,
+    "kex_high": 0,
+    "hygiene_low": 0,
+    "hygiene_high": 0,
+    "access_low": 0,
+    "access_high": 0
+  },
+
+  "_board": "The board narrative. This is the part of the report a director actually reads, and the part no scanner can generate — it is your judgement about this client, in their language.",
+  "board": {
+    "position_good": "TODO — what is genuinely competent about this estate. Say it plainly; it buys credibility for the rest.",
+    "position_bad": "TODO — the gap, framed against their own obligation rather than against peers.",
+    "exposure_statement": "TODO — the retrospective consequence in their terms, e.g. 'Records must stay confidential to 2033, past the CRQC estimate.'",
+    "ask_headline": "TODO — the figure and the timeframe. Must match the investment total the report computes.",
+    "ask_detail": "TODO — the tracks and who owns each.",
+    "outcome": "TODO — modelled index after the work.",
+    "if_deferred": "TODO — what a month of delay costs.",
+    "decision": "TODO — the decision being put to the board.",
+    "decision_owner": "TODO — recommended accountable owner, e.g. 'Chief Information Security Officer'"
+  }
+}
