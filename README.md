@@ -46,6 +46,23 @@ card, and the six board narrative fields. They are yours to state.
 prefer scripting it — `node set-profile.js <domain> profile-template.json
 --url https://your-host` — but you should not need them.
 
+### Or build a draft now
+
+The dialog has a **Build draft anyway** button. It produces the real report
+with every unanswered field printed as `[TO BE COMPLETED]`, so you can see the
+format and circulate it internally before the judgements are made.
+
+A draft is marked as one everywhere a reader could look: `DRAFT — NOT FOR ISSUE`
+in the running header of every page, `DRAFT` in the filename, and a closing
+**Outstanding** section naming each remaining field and why it matters — so the
+draft doubles as the worklist for finishing it.
+
+Two things it will not do. It will not invent the retention period: with none
+stated, *Data lifetime* is reported as unassessed and drops out of the
+denominator, so the index reads **58 / 80** rather than a figure computed from a
+guess. And draft is always an explicit request — never a fallback when the gate
+fails.
+
 ---
 
 ## What changed

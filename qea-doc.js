@@ -169,8 +169,43 @@ function validate(scan) {
 /* Returns { buffer, sections }. `opts.tocPages` maps a section title to the
    page it landed on; without it the contents page renders unnumbered, which
    is deliberate — a stale page number is worse than no page number. */
+const DRAFT_MARK = '[TO BE COMPLETED]';
+
+/* Collect every TODO and swap it for the marker, leaving the rest untouched.
+   Done on a copy of the input rather than at each of the renderer's many call
+   sites, so a field added later cannot slip through unmarked. */
+function draftify(node, outstanding, path = '') {
+  if (typeof node === 'string') {
+    if (node.startsWith('TODO')) {
+      outstanding.push({ path, why: node.replace(/^TODO — /, '') });
+      return DRAFT_MARK;
+    }
+    return node;
+  }
+  if (Array.isArray(node)) return node.map((v, i) => draftify(v, outstanding, `${path}[${i}]`));
+  if (node && typeof node === 'object') {
+    const o = {};
+    for (const [k, v] of Object.entries(node)) o[k] = draftify(v, outstanding, path ? `${path}.${k}` : k);
+    return o;
+  }
+  return node;
+}
+
 async function build(scan, opts = {}) {
   const TOC_PAGES = opts.tocPages || null;
+
+  /* Draft: build before the profile is complete, with every unanswered field
+     marked. The document says so in the header, the classification, a banner
+     on page one and a closing section — a draft that can be mistaken for a
+     deliverable is worse than no draft at all. */
+  const DRAFT = !!opts.draft;
+  const OUTSTANDING = [];
+  if (DRAFT) {
+    scan = draftify(scan, OUTSTANDING);
+    scan.client = Object.assign({}, scan.client, {
+      classification: 'DRAFT — NOT FOR ISSUE',
+    });
+  }
   const c = scan.client;
   const a = scan.assessment;
   const s = scan.scope;
@@ -178,8 +213,13 @@ async function build(scan, opts = {}) {
      The band decides the colour everywhere the index is shown. */
   const BAND_TONE = { HIGH: RED, MEDIUM: AMBER, LOW: GREEN };
   const bandTone = BAND_TONE[a.band] || RED;
-  const horizon = a.assessment_year + c.data_retention_years;
-  const overrun = horizon - a.crqc_estimate;
+  /* In a draft the retention period may not have been stated yet, in which
+     case the horizon and the overrun are not computable. Printing NaN into a
+     board document is not an option, and neither is picking a number. */
+  const retentionKnown = typeof c.data_retention_years === 'number' &&
+                         isFinite(c.data_retention_years);
+  const horizon = retentionKnown ? a.assessment_year + c.data_retention_years : null;
+  const overrun = retentionKnown ? horizon - a.crqc_estimate : null;
   const K = [];
 
   /* Sections register themselves as they are emitted, so the contents page and the
@@ -237,8 +277,8 @@ async function build(scan, opts = {}) {
         p([t('exposure index', { size: 13, color: MUTED, caps: true, spacing: 40 })], { after: 0, align: AlignmentType.CENTER }),
       ], { width: 2340 }),
       cell([
-        p([t(`${overrun}`, { size: 36, bold: true, color: RED })], { after: 15, align: AlignmentType.CENTER }),
-        p([t('years unprotected', { size: 13, color: MUTED, caps: true, spacing: 40 })], { after: 0, align: AlignmentType.CENTER }),
+        p([t(retentionKnown ? `${overrun}` : '—', { size: 36, bold: true, color: retentionKnown ? RED : MUTED })], { after: 15, align: AlignmentType.CENTER }),
+        p([t(retentionKnown ? 'years unprotected' : 'retention not stated', { size: 13, color: MUTED, caps: true, spacing: 40 })], { after: 0, align: AlignmentType.CENTER }),
       ], { width: 2340 }),
       cell([
         p([t(`${scan.kex.hosts_with_pq_kex} / ${s.hosts_reachable}`, { size: 36, bold: true, color: RED })], { after: 15, align: AlignmentType.CENTER }),
@@ -338,8 +378,12 @@ async function build(scan, opts = {}) {
 
   K.push(gap(260));
   K.push(tbl([W], [new TableRow({ children: [cell([
-    p([t(`${overrun} years of unprotected confidentiality`, { size: 21, bold: true, color: RED })], { after: 110 }),
-    p(`${c.retention_basis}. Material intercepted today therefore remains confidential until ${horizon} — ${overrun} years beyond the point at which the cryptography protecting it in transit is expected to be broken.`, { after: 110 }),
+    p([t(retentionKnown
+      ? `${overrun} years of unprotected confidentiality`
+      : 'Exposure window not yet quantifiable', { size: 21, bold: true, color: retentionKnown ? RED : MUTED })], { after: 110 }),
+    p(retentionKnown
+      ? `${c.retention_basis}. Material intercepted today therefore remains confidential until ${horizon} — ${overrun} years beyond the point at which the cryptography protecting it in transit is expected to be broken.`
+      : `The retention period has not been stated, so the exposure window cannot be computed. It is the single largest determinant of this assessment — worth 20 index points — and until it is attested the index is scored out of ${a.qei_max} rather than 100.`, { after: 110 }),
     p('The consequence is that the exposure is not in the future. Traffic captured now, stored, and decrypted later is compromised from the moment it is recorded. Enabling post-quantum key establishment does not repair material already intercepted; it stops the window widening.', { after: 0 }),
   ], { width: W, fill: WASH })]})]));
 
@@ -745,6 +789,32 @@ async function build(scan, opts = {}) {
      A live Word TOC field was the obvious choice and is the wrong one here: the
      deliverable is a PDF, and headless converters leave the field unpopulated —
      the client would receive a blank contents page. */
+  /* Everything still outstanding, named with the reason it matters, so the
+     draft is also the worklist for finishing it. */
+  if (DRAFT) {
+    open_('Before issue', 'Outstanding');
+    K.push(p('This document is a draft. Every field marked ' + DRAFT_MARK + ' is a judgement the scan cannot make, and each one below must be answered before the report is issued to a client.', { after: 140 }));
+    if (!OUTSTANDING.length) {
+      K.push(p('Nothing outstanding.', { after: 140 }));
+    } else {
+      K.push(tbl([2900, 6460], [
+        new TableRow({ children: [
+          cell([p([t('Field', { size: 16, bold: true, color: AMBER, caps: true, spacing: 40 })])], { width: 2900, fill: WASH }),
+          cell([p([t('What is needed', { size: 16, bold: true, color: AMBER, caps: true, spacing: 40 })])], { width: 6460, fill: WASH }),
+        ]}),
+        ...OUTSTANDING.map(o => new TableRow({ children: [
+          cell([p([t(o.path, { size: 17, bold: true })])], { width: 2900 }),
+          cell([p([t(o.why, { size: 17, color: MUTED })])], { width: 6460 }),
+        ]})),
+      ]));
+      K.push(gap(160));
+      K.push(p([t(`${OUTSTANDING.length} field${OUTSTANDING.length === 1 ? '' : 's'} outstanding.`, { bold: true, color: RED })], { after: 140 }));
+    }
+    if (!scan.assessment || scan.assessment.complete === false) {
+      K.push(p([t('The index is scored out of ' + ((scan.assessment && scan.assessment.qei_max) || 100) + ', not 100: dimensions that could not be assessed are removed from the denominator rather than scored zero. Answering the outstanding fields — the retention period above all — will change both the figure and its maximum.', { color: MUTED })], { after: 140 }));
+    }
+  }
+
   const numbered = TOC_PAGES && SECTIONS.every(x => TOC_PAGES[x.title]);
   const tocRows = SECTIONS.map(x => new TableRow({ children: [
     cell(x.kicker, { width: 2200, size: 14, caps: true, color: MUTED, bold: true }),
@@ -784,7 +854,9 @@ async function build(scan, opts = {}) {
         children: [
           t('CipherQ', { size: 14, bold: true, color: AMBER, caps: true, spacing: 60 }),
           t('     Quantum Exposure Assessment     ', { size: 14, color: MUTED, caps: true, spacing: 60 }),
-          t(c.classification, { size: 14, color: MUTED }),
+          /* On every page, not just the first — pages get printed and
+             circulated separately from the document they came out of. */
+          t(c.classification, { size: 14, color: DRAFT ? RED : MUTED, bold: DRAFT }),
         ],
         spacing: { after: 220 },
       })]})},

@@ -362,7 +362,7 @@ app.post('/api/report', reportLimiter, async (req, res) => {
     loadProfile: (domain) => reportProfile.read(domain),
     log: (level, msg, meta) =>
       console[level === 'error' ? 'error' : 'log'](`[CipherQ] ${msg}`, meta || ''),
-  })({ body: { scanResult: scan, httpData, networkData, domain: scan.summary.domain } }, res);
+  })({ body: { scanResult: scan, httpData, networkData, domain: scan.summary.domain, draft: !!req.body.draft } }, res);
 });
 
 // ─── GET / PUT /api/report/profile/:domain ────────────────────────────────────

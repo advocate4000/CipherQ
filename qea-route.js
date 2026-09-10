@@ -67,11 +67,16 @@ function handler(deps = {}) {
          assessed:false, the operational-access dimension leaves the
          denominator, and the document silently loses Class D and its section
          while still validating. */
+      /* Draft: build before the profile is complete. Explicit — never a
+         fallback when the gate fails — and the document says DRAFT in its
+         header, classification, closing section and filename. */
+      const draft = !!(body.draft || (req.query && req.query.draft));
       const input = buildInput(
         scanResult,
         body.httpData || null,
         profile,
-        body.networkData || null
+        body.networkData || null,
+        { draft }
       );
 
       /* Context-aware gate: the two operator-access rates are only required
@@ -81,7 +86,7 @@ function handler(deps = {}) {
         input.dnel && input.dnel.operator_surface_hosts > 0
       );
       const missing = reportProfile.missing(profile, { accessTrack });
-      if (missing.length) {
+      if (missing.length && !draft) {
         log('info', 'report profile incomplete', { domain, missing: missing.length });
         return res.status(409).json({
           error: 'Report profile incomplete.',
@@ -95,7 +100,7 @@ function handler(deps = {}) {
          components is worse than no report — it is a document a client may act
          on. */
       const v = validate(input);
-      if (!v.ok) {
+      if (!v.ok && !draft) {
         log('error', 'report failed validation', {
           domain,
           todos: v.todos.length,
@@ -109,10 +114,11 @@ function handler(deps = {}) {
         });
       }
 
-      const { buffer, sections } = await build(input);
+      const { buffer, sections } = await build(input, { draft });
 
       const filename =
         'CipherQ_QEA_' +
+        (draft ? 'DRAFT_' : '') +
         safeFilenameSegment(domain) +
         '_' +
         new Date().toISOString().slice(0, 10) +
@@ -123,6 +129,8 @@ function handler(deps = {}) {
         bytes: buffer.length,
         sections: sections.length,
         dnel: accessTrack,
+        draft,
+        outstanding: draft ? v.todos.length : 0,
         qei: input.assessment.qei,
         qei_max: input.assessment.qei_max,
       });
@@ -138,6 +146,10 @@ function handler(deps = {}) {
       res.setHeader('X-CipherQ-QEI', String(input.assessment.qei));
       res.setHeader('X-CipherQ-QEI-Max', String(input.assessment.qei_max));
       res.setHeader('X-CipherQ-Sections', String(sections.length));
+      if (draft) {
+        res.setHeader('X-CipherQ-Draft', 'true');
+        res.setHeader('X-CipherQ-Outstanding', String(v.todos.length));
+      }
       return res.send(buffer);
     } catch (err) {
       log('error', 'report generation failed', { domain, message: err.message });

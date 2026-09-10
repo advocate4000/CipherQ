@@ -155,7 +155,7 @@ function project(f, retentionYears, assessmentYear) {
 /* ── the report input ─────────────────────────────────────────────────── */
 /* `profile` supplies what a scan cannot observe. Anything it does not supply
    becomes a TODO, which the generator's gate refuses to build. */
-function buildInput(scan, httpData, profile = {}, networkData = null) {
+function buildInput(scan, httpData, profile = {}, networkData = null, opts = {}) {
   const f = deriveFacts(scan, httpData, networkData);
   if (f.reachable === 0) {
     const e = new Error('No host completed a TLS handshake in this scan; there is nothing to report on.');
@@ -167,9 +167,12 @@ function buildInput(scan, httpData, profile = {}, networkData = null) {
   const assessmentYear = profile.assessment_year || new Date().getFullYear();
   const retention = typeof profile.data_retention_years === 'number' ? profile.data_retention_years : null;
 
-  /* Scored with a placeholder so the observable dimensions are visible in a
-     draft. The gate blocks on the retention TODO regardless. */
-  const p = project(f, retention === null ? 10 : retention, assessmentYear);
+  /* A draft must not be scored against an invented retention period — that
+     is the number a reader would screenshot. Passing null makes Data lifetime
+     UNASSESSED and drops it from the denominator, which is what qei.js already
+     does for operational access. Outside draft mode the gate guarantees a real
+     figure, so the placeholder never applies. */
+  const p = project(f, retention === null && opts.draft ? null : (retention === null ? 10 : retention), assessmentYear);
   const scored = p.now;
   const or = (v, todo) => (v === undefined || v === null || v === '' ? TODO(todo) : v);
 
