@@ -13,7 +13,6 @@ format for reference.
 | `qea-doc.js` | Builds the document. `validate(input)` then `build(input)` |
 | `qea-input.js` | Maps scanner output into report input |
 | `report-profile.js` | Stores the half of a report a scan cannot observe |
-| `dnel.js` | Deploy Now, Exploit Later — the third risk axis. Single source of truth for operator-access exposure |
 
 ## The workflow
 
@@ -65,45 +64,7 @@ report makes, and a score blind to it cannot tell a 15-year firm from a 2-year o
 with identical infrastructure — and because every dimension decomposes into
 points, a maximum, and the observation behind it.
 
-`QEI_METHOD_VERSION` is **3**. Version 1 was the retired scanner scorer;
-version 2 was the six-dimension index before DNEL.
-
-### Version 3 — operational access
-
-A seventh dimension, worth 15 points, for Deploy Now, Exploit Later: the
-exposure created when an adversary presents authentication material that is
-genuinely valid because you issued it, rather than decrypting traffic (HNDL) or
-forging an artifact (TNFL). Computed in `dnel.js` from the network scan's port
-evidence; the arithmetic lives in `qei.js` so the projection can re-run it
-against a modelled estate.
-
-The 15 points came from exposure surface (15→10), certificate posture (15→12),
-transport hygiene (15→11) and surface discipline (10→7) — dimensions that either
-overlap with the new one or are explicitly not quantum exposures. Key
-establishment and data lifetime are untouched.
-
-**Every existing score moves.** One suppressed trend per domain is expected on
-the first scan after this deploys, for the same reason a first retention entry
-suppresses one: the numbers either side were not computed under the same rules.
-
-Operational access is **unassessed without a network scan** and drops from the
-denominator exactly as data lifetime does. An estate that was never port-scanned
-is not an estate with no exposed operator surface. In practice this means a
-scan-only report scores out of 85, and running the Network & Ports scan can move
-the band — which is the argument for running it.
-
-`buildInput` now takes a fourth argument:
-
-```js
-buildInput(scanResult, httpData, profile, networkData)
-```
-
-and `reportProfile.missing()` takes a context, so the two new operator-access
-rate-card fields are only required when a Class D exposure was actually raised:
-
-```js
-reportProfile.missing(profile, { accessTrack: dnelWasAssessed })
-```
+`QEI_METHOD_VERSION` is **2**. Version 1 was the retired scorer.
 
 ### Scores out of 80
 
@@ -121,20 +82,6 @@ number that looks like progress and means nothing. `getBoardMetrics` returns
 `quantumExposureTrend: null` and `quantumExposureTrendSuppressed` with the reason.
 Expect this once after setting a retention period for the first time: the previous
 scan was out of 80 and the new one is out of 100.
-
-## Class D — operational
-
-Exposures are grouped by threat model. The fourth class is not a severity tier:
-
-- **Class A — retrospective.** Delay increases the volume compromised, and
-  nothing retires it.
-- **Class B — forward.** Risk begins at Q-Day; historic material is unaffected.
-- **Class C — present-day.** Unrelated to quantum, same programme.
-- **Class D — operational.** The adversary neither decrypts nor forges. Delay
-  increases the harvested credential volume as in Class A — but **rotation
-  retires it**, which Class A has no equivalent of. That difference is why the
-  operator-access track is scoped around credential lifetime and gateway
-  placement rather than around cryptography alone.
 
 ## Known gap
 

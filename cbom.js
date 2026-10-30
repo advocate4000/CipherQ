@@ -113,11 +113,7 @@ const { deriveFacts } = require('./qea-input');
 const reportProfile = require('./report-profile');
 
 function computeQEI(scanResult, dnsData, httpData, networkData, retentionYears = null) {
-  /* networkData was accepted and then ignored. With DNEL in the index it
-     carries the operator-surface evidence, so a dashboard computed without
-     it would disagree with a report computed with it — the exact split this
-     file's header describes closing. deriveFacts now takes it. */
-  const f = deriveFacts(scanResult, httpData, networkData);
+  const f = deriveFacts(scanResult, httpData);
   return scoreQEI({
     reachable: f.reachable,
     hostsWithPqKex: f.pqHosts,
@@ -131,7 +127,6 @@ function computeQEI(scanResult, dnsData, httpData, networkData, retentionYears =
     hostsBelowTls13: f.belowTls13,
     devOrStagingReachable: f.devHosts,
     dormantDnsRecords: f.dormant,
-    dnel: f.dnel && f.dnel.facts,
   }, {
     retentionYears,
     assessmentYear: new Date().getFullYear(),

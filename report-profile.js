@@ -50,12 +50,6 @@ const REQUIRED = [
   ['rate_card.kex_high', 'Key establishment, upper bound'],
   ['rate_card.hygiene_low', 'Hygiene work, lower bound'],
   ['rate_card.hygiene_high', 'Hygiene work, upper bound'],
-  /* Only required when the scan actually found a reachable operator surface —
-     see missing(). An estate with none does not get a cost line for work it
-     does not need, and is not blocked from reporting by a rate it will never
-     print. */
-  ['rate_card.access_low', 'Operator-access work, lower bound — gateway placement, management-plane key exchange, credential rotation'],
-  ['rate_card.access_high', 'Operator-access work, upper bound'],
   ['board.position_good', 'What is competent about this estate'],
   ['board.position_bad', 'The gap, framed against the client\'s own obligation'],
   ['board.exposure_statement', 'The retrospective consequence in the client\'s terms'],
@@ -101,19 +95,12 @@ function write(domain, patch, tenantId = DEFAULT_TENANT) {
   return merged;
 }
 
-/* `opts.accessTrack` says whether this scan raised a Class D exposure. When
-   it did not, the operator-access rates are not required: the report has no
-   band to cost, and demanding a rate for absent work would block a build for
-   no reason. Callers that cannot tell should omit it and get the strict set. */
-function missing(profile, opts = {}) {
-  const needAccess = opts.accessTrack !== false;
-  return REQUIRED
-    .filter(([f]) => (needAccess || !f.startsWith('rate_card.access_')))
-    .filter(([f]) => !isSet(dig(profile, f)))
+function missing(profile) {
+  return REQUIRED.filter(([f]) => !isSet(dig(profile, f)))
     .map(([field, why]) => ({ field, why }));
 }
 
-const isComplete = (profile, opts = {}) => missing(profile, opts).length === 0;
+const isComplete = profile => missing(profile).length === 0;
 
 /* Retention drives the data-lifetime dimension of the index. Returns null
    when unset so the scorer marks that dimension unassessed rather than

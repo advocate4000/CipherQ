@@ -18,7 +18,7 @@ const TODO = s => `TODO — ${s}`;
 const CRQC_YEAR = 2033;
 
 /* ── what the scan actually observed ──────────────────────────────────── */
-function deriveFacts(scan, httpData, dnsData, netData) {
+function deriveFacts(scan, httpData) {
   const summary = scan.summary || {};
   const hosts = scan.hosts || [];
   const reachableHosts = hosts.filter(h => h.tls && h.tls.cipher);
@@ -71,25 +71,7 @@ function deriveFacts(scan, httpData, dnsData, netData) {
   const reachableNames = new Set(reachableHosts.map(h => h.hostname));
   const devHosts = (summary.devHostsExposed || []).filter(n => reachableNames.has(n)).length;
 
-  /* DNS and network were previously not parameters at all — 29 DNS checks
-     and 12 network checks ran, found things, and were dropped before the
-     report. Severity counts are carried so the exposures below can be
-     generated from them. */
-  const dnsF = (dnsData && dnsData.findings) || [];
-  const netF = (netData && netData.findings) || [];
-  const has = (arr, id) => arr.some(f => f.id === id);
-  const countOf = (arr, id) => arr.filter(f => f.id === id).length;
-
   return {
-    dnsFindings: dnsF,
-    netFindings: netF,
-    dnssecMissing: has(dnsF, 'DNS-NO-DNSSEC'),
-    axfrOpen: has(dnsF, 'DNS-AXFR-OPEN'),
-    takeovers: countOf(dnsF, 'DNS-SUBDOMAIN-TAKEOVER'),
-    danglingCnames: countOf(dnsF, 'DNS-DANGLING-CNAME'),
-    caaMissing: has(dnsF, 'DNS-NO-CAA'),
-    dmarcWeak: has(dnsF, 'EMAIL-DMARC-NONE') || has(dnsF, 'EMAIL-NO-DMARC'),
-    sshNoPq: countOf(netF, 'SSH-NO-PQ-KEX'),
     summary, reachableHosts, reachable,
     pqHosts: pqHosts.length,
     inconclusive: inconclusive.length,
@@ -139,8 +121,8 @@ function project(f, retentionYears, assessmentYear) {
 /* ── the report input ─────────────────────────────────────────────────── */
 /* `profile` supplies what a scan cannot observe. Anything it does not supply
    becomes a TODO, which the generator's gate refuses to build. */
-function buildInput(scan, httpData, profile = {}, dnsData = null, netData = null) {
-  const f = deriveFacts(scan, httpData, dnsData, netData);
+function buildInput(scan, httpData, profile = {}) {
+  const f = deriveFacts(scan, httpData);
   if (f.reachable === 0) {
     const e = new Error('No host completed a TLS handshake in this scan; there is nothing to report on.');
     e.code = 'NOTHING_ASSESSED';
@@ -219,62 +201,6 @@ function buildInput(scan, httpData, profile = {}, dnsData = null, netData = null
       ],
     });
   }
-  if (f.takeovers > 0 || f.danglingCnames > 0) {
-    exposures.push({
-      ref: 'C3', class: 'C',
-      title: f.takeovers
-        ? `Subdomain takeover possible on ${f.takeovers} host${f.takeovers === 1 ? '' : 's'}`
-        : `${f.danglingCnames} dangling DNS record${f.danglingCnames === 1 ? '' : 's'}`,
-      hosts_affected: f.takeovers + f.danglingCnames,
-      score_contribution: scored.components[5].points,
-      observation: `${f.takeovers} host(s) carry a CNAME to an unclaimed resource and ${f.danglingCnames} resolve to a target that no longer exists.`,
-      why_it_matters: 'Unrelated to quantum computing, and more urgent than anything on this list. An unclaimed '
-        + 'resource can be registered by anyone, who then serves content under your domain — bypassing brand, '
-        + 'security headers and, where the subdomain shares a parent with authenticated services, session cookies.',
-      action: 'Re-register the resource or remove the DNS record. Audit the remaining dangling entries.',
-      evidence: [
-        { label: 'Takeover candidates', value: String(f.takeovers) },
-        { label: 'Dangling CNAME records', value: String(f.danglingCnames) },
-      ],
-    });
-  }
-  if (f.dnssecMissing || f.axfrOpen || f.caaMissing || f.dmarcWeak) {
-    const items = [];
-    if (f.dnssecMissing) items.push('the zone is unsigned');
-    if (f.axfrOpen) items.push('zone transfer is open to unauthenticated callers');
-    if (f.caaMissing) items.push('no CAA records constrain certificate issuance');
-    if (f.dmarcWeak) items.push('DMARC takes no action on failures');
-    exposures.push({
-      ref: 'C4', class: 'C',
-      title: 'DNS and email authentication incomplete',
-      hosts_affected: 1,
-      score_contribution: scored.components[4].points,
-      observation: `On the authoritative zone: ${items.join('; ')}.`,
-      why_it_matters: 'DNS is the layer that decides where traffic goes before any cryptography applies. An '
-        + 'unsigned zone means those answers are unauthenticated; absent CAA means any public authority may '
-        + 'issue for the domain. Neither is a quantum problem, and both undermine the transport work that is.',
-      action: 'Sign the zone and publish a DS record. Restrict AXFR to authorised secondaries. Publish CAA. Progress DMARC beyond p=none.',
-      evidence: [
-        { label: 'DNSSEC', value: f.dnssecMissing ? 'Not deployed' : 'Deployed' },
-        { label: 'Zone transfer', value: f.axfrOpen ? 'Open' : 'Restricted' },
-        { label: 'CAA records', value: f.caaMissing ? 'None' : 'Present' },
-      ],
-    });
-  }
-  if (f.sshNoPq > 0) {
-    exposures.push({
-      ref: 'A2', class: 'A',
-      title: `SSH offers no post-quantum key exchange on ${f.sshNoPq} host${f.sshNoPq === 1 ? '' : 's'}`,
-      hosts_affected: f.sshNoPq,
-      score_contribution: 0,
-      observation: `${f.sshNoPq} SSH endpoint(s) negotiate only classical key exchange.`,
-      why_it_matters: 'Retrospective, and arguably worse than the web traffic it sits behind: SSH sessions carry '
-        + 'administrative credentials and configuration. Recorded now, decrypted later, they yield lateral movement '
-        + 'into everything.',
-      action: 'Enable sntrup761x25519-sha512 or mlkem768x25519-sha256 in sshd KexAlgorithms, placed first.',
-      evidence: [{ label: 'SSH endpoints without PQ KEX', value: String(f.sshNoPq) }],
-    });
-  }
   if (f.devHosts > 0) {
     exposures.push({
       ref: 'C2', class: 'C',
@@ -349,14 +275,6 @@ function buildInput(scan, httpData, profile = {}, dnsData = null, netData = null
         status: f.hs ? 'Verified' : 'Out of scope',
         confidence: f.hs ? 'High' : '—' },
       { area: 'Host surface', method: 'Passive — Certificate Transparency, DNS', status: 'Verified', confidence: 'High' },
-      { area: 'DNS and email authentication',
-        method: dnsData ? 'Active — DNSSEC, CAA, AXFR, SPF/DKIM/DMARC' : 'Not assessed',
-        status: dnsData ? 'Verified' : 'Out of scope',
-        confidence: dnsData ? 'High' : '—' },
-      { area: 'Network and SSH',
-        method: netData ? 'Active — port and SSH inspection' : 'Not assessed',
-        status: netData ? 'Verified' : 'Out of scope',
-        confidence: netData ? 'High' : '—' },
       { area: 'Data retention period', method: 'Client-declared', status: 'Inferred', confidence: 'Client attestation' },
       { area: 'Internal cryptography', method: 'Not assessed', status: 'Out of scope', confidence: '—' },
       { area: 'Supplier posture', method: 'Not assessed', status: 'Out of scope', confidence: '—' },
