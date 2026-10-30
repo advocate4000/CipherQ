@@ -13,23 +13,12 @@
    ═══════════════════════════════════════════════════════════════════════ */
 
 const { computeQEI } = require('./qei');
-const { assessDNEL } = require('./dnel');
 
 const TODO = s => `TODO — ${s}`;
 const CRQC_YEAR = 2033;
 
-/* Components were read positionally — components[0], [3], [4], [5]. That
-   worked while the index had exactly six dimensions in a fixed order and
-   broke silently the moment a seventh was inserted: an exposure would have
-   printed another dimension's points as its own contribution, and nothing
-   would have complained. Read by name. */
-function ptsOf(scored, dimension) {
-  const c = (scored.components || []).find(x => x.dimension === dimension);
-  return c ? c.points : 0;
-}
-
 /* ── what the scan actually observed ──────────────────────────────────── */
-function deriveFacts(scan, httpData, networkData) {
+function deriveFacts(scan, httpData, dnsData, netData) {
   const summary = scan.summary || {};
   const hosts = scan.hosts || [];
   const reachableHosts = hosts.filter(h => h.tls && h.tls.cipher);
@@ -82,14 +71,26 @@ function deriveFacts(scan, httpData, networkData) {
   const reachableNames = new Set(reachableHosts.map(h => h.hostname));
   const devHosts = (summary.devHostsExposed || []).filter(n => reachableNames.has(n)).length;
 
-  /* DNEL is assessed only where the network scan ran; dnel.js reports
-     assessed:false otherwise and the index drops the dimension rather than
-     scoring it zero. */
-  const dnel = assessDNEL(scan, networkData);
+  /* DNS and network were previously not parameters at all — 29 DNS checks
+     and 12 network checks ran, found things, and were dropped before the
+     report. Severity counts are carried so the exposures below can be
+     generated from them. */
+  const dnsF = (dnsData && dnsData.findings) || [];
+  const netF = (netData && netData.findings) || [];
+  const has = (arr, id) => arr.some(f => f.id === id);
+  const countOf = (arr, id) => arr.filter(f => f.id === id).length;
 
   return {
+    dnsFindings: dnsF,
+    netFindings: netF,
+    dnssecMissing: has(dnsF, 'DNS-NO-DNSSEC'),
+    axfrOpen: has(dnsF, 'DNS-AXFR-OPEN'),
+    takeovers: countOf(dnsF, 'DNS-SUBDOMAIN-TAKEOVER'),
+    danglingCnames: countOf(dnsF, 'DNS-DANGLING-CNAME'),
+    caaMissing: has(dnsF, 'DNS-NO-CAA'),
+    dmarcWeak: has(dnsF, 'EMAIL-DMARC-NONE') || has(dnsF, 'EMAIL-NO-DMARC'),
+    sshNoPq: countOf(netF, 'SSH-NO-PQ-KEX'),
     summary, reachableHosts, reachable,
-    dnel,
     pqHosts: pqHosts.length,
     inconclusive: inconclusive.length,
     groups: [...groups],
@@ -120,7 +121,6 @@ function scoreFrom(f, retentionYears, assessmentYear) {
     hostsBelowTls13: f.belowTls13,
     devOrStagingReachable: f.devHosts,
     dormantDnsRecords: f.dormant,
-    dnel: f.dnelFacts || (f.dnel && f.dnel.facts) || null,
   }, { retentionYears, assessmentYear, crqcYear: CRQC_YEAR });
 }
 
@@ -128,35 +128,19 @@ function scoreFrom(f, retentionYears, assessmentYear) {
    estate as it would stand. Not an estimate — the same scorer, different
    inputs. */
 function project(f, retentionYears, assessmentYear) {
-  const base = (f.dnel && f.dnel.facts) || null;
-  /* Hybrid key establishment is one programme across TLS and SSH, so the
-     key-exchange band clears the classical-auth half of the operator-access
-     dimension too. It does not clear the surfaces themselves — that is the
-     access band's work, and it is a firewall change rather than a crypto one. */
-  const dnelAfterKex = base ? { ...base, classicalOperatorAuth: false } : null;
-  /* Surfaces behind an authenticated gateway, cleartext protocols retired. */
-  const dnelAfterAccess = base
-    ? { ...base, classicalOperatorAuth: false, cleartextAdmin: false,
-        operatorSurfaceClasses: 0, worstSurfaceWeight: 0, operatorSurfaceHosts: 0 }
-    : null;
-
   const now = scoreFrom(f, retentionYears, assessmentYear);
-  const afterKex = scoreFrom(
-    { ...f, pqHosts: f.reachable, dnelFacts: dnelAfterKex }, retentionYears, assessmentYear);
-  const afterAccess = scoreFrom(
-    { ...f, pqHosts: f.reachable, dnelFacts: dnelAfterAccess }, retentionYears, assessmentYear);
+  const afterKex = scoreFrom({ ...f, pqHosts: f.reachable }, retentionYears, assessmentYear);
   const afterAll = scoreFrom({
-    ...f, pqHosts: f.reachable, dnelFacts: dnelAfterAccess,
-    noHsts: 0, noCsp: 0, mixed: 0, devHosts: 0, dormant: 0,
+    ...f, pqHosts: f.reachable, noHsts: 0, noCsp: 0, mixed: 0, devHosts: 0, dormant: 0,
   }, retentionYears, assessmentYear);
-  return { now, afterKex, afterAccess, afterAll };
+  return { now, afterKex, afterAll };
 }
 
 /* ── the report input ─────────────────────────────────────────────────── */
 /* `profile` supplies what a scan cannot observe. Anything it does not supply
    becomes a TODO, which the generator's gate refuses to build. */
-function buildInput(scan, httpData, profile = {}, networkData = null, opts = {}) {
-  const f = deriveFacts(scan, httpData, networkData);
+function buildInput(scan, httpData, profile = {}, dnsData = null, netData = null) {
+  const f = deriveFacts(scan, httpData, dnsData, netData);
   if (f.reachable === 0) {
     const e = new Error('No host completed a TLS handshake in this scan; there is nothing to report on.');
     e.code = 'NOTHING_ASSESSED';
@@ -167,12 +151,9 @@ function buildInput(scan, httpData, profile = {}, networkData = null, opts = {})
   const assessmentYear = profile.assessment_year || new Date().getFullYear();
   const retention = typeof profile.data_retention_years === 'number' ? profile.data_retention_years : null;
 
-  /* A draft must not be scored against an invented retention period — that
-     is the number a reader would screenshot. Passing null makes Data lifetime
-     UNASSESSED and drops it from the denominator, which is what qei.js already
-     does for operational access. Outside draft mode the gate guarantees a real
-     figure, so the placeholder never applies. */
-  const p = project(f, retention === null && opts.draft ? null : (retention === null ? 10 : retention), assessmentYear);
+  /* Scored with a placeholder so the observable dimensions are visible in a
+     draft. The gate blocks on the retention TODO regardless. */
+  const p = project(f, retention === null ? 10 : retention, assessmentYear);
   const scored = p.now;
   const or = (v, todo) => (v === undefined || v === null || v === '' ? TODO(todo) : v);
 
@@ -182,7 +163,7 @@ function buildInput(scan, httpData, profile = {}, networkData = null, opts = {})
       ref: 'A1', class: 'A',
       title: 'Session keys established with quantum-vulnerable cryptography',
       hosts_affected: f.reachable - f.pqHosts,
-      score_contribution: ptsOf(scored, 'Key establishment'),
+      score_contribution: scored.components[0].points,
       observation: `${f.reachable - f.pqHosts} of ${f.reachable} reachable hosts establish session keys with `
         + `classical key exchange. `
         + (f.inconclusive ? `${f.inconclusive} host(s) returned an inconclusive probe and are counted as not confirmed. ` : '')
@@ -208,7 +189,7 @@ function buildInput(scan, httpData, profile = {}, networkData = null, opts = {})
       ref: 'B1', class: 'B',
       title: 'Certificate estate signed under classical PKI throughout',
       hosts_affected: f.reachable - f.pqSigCount,
-      score_contribution: ptsOf(scored, 'Certificate posture'),
+      score_contribution: scored.components[3].points,
       observation: `${f.reachable - f.pqSigCount} of ${f.reachable} certificates use a classical signature algorithm.`,
       why_it_matters: 'Signature compromise is a forgery risk from the moment a quantum computer exists, not a '
         + 'retrospective one — it does not expose historic sessions. Recorded so the distinction from Class A is explicit.',
@@ -226,7 +207,7 @@ function buildInput(scan, httpData, profile = {}, networkData = null, opts = {})
       ref: 'C1', class: 'C',
       title: `${f.noHsts} hosts serve no HTTP Strict Transport Security header`,
       hosts_affected: f.noHsts,
-      score_contribution: ptsOf(scored, 'Transport hygiene'),
+      score_contribution: scored.components[4].points,
       observation: `${f.noHsts} of ${f.reachable} reachable hosts return no HSTS header; ${f.noCsp} serve no Content-Security-Policy.`,
       why_it_matters: 'A present-day risk, unrelated to quantum computing. Included because a post-quantum programme '
         + 'cannot credibly be built on an estate with unresolved transport hygiene. These run alongside the '
@@ -238,12 +219,68 @@ function buildInput(scan, httpData, profile = {}, networkData = null, opts = {})
       ],
     });
   }
+  if (f.takeovers > 0 || f.danglingCnames > 0) {
+    exposures.push({
+      ref: 'C3', class: 'C',
+      title: f.takeovers
+        ? `Subdomain takeover possible on ${f.takeovers} host${f.takeovers === 1 ? '' : 's'}`
+        : `${f.danglingCnames} dangling DNS record${f.danglingCnames === 1 ? '' : 's'}`,
+      hosts_affected: f.takeovers + f.danglingCnames,
+      score_contribution: scored.components[5].points,
+      observation: `${f.takeovers} host(s) carry a CNAME to an unclaimed resource and ${f.danglingCnames} resolve to a target that no longer exists.`,
+      why_it_matters: 'Unrelated to quantum computing, and more urgent than anything on this list. An unclaimed '
+        + 'resource can be registered by anyone, who then serves content under your domain — bypassing brand, '
+        + 'security headers and, where the subdomain shares a parent with authenticated services, session cookies.',
+      action: 'Re-register the resource or remove the DNS record. Audit the remaining dangling entries.',
+      evidence: [
+        { label: 'Takeover candidates', value: String(f.takeovers) },
+        { label: 'Dangling CNAME records', value: String(f.danglingCnames) },
+      ],
+    });
+  }
+  if (f.dnssecMissing || f.axfrOpen || f.caaMissing || f.dmarcWeak) {
+    const items = [];
+    if (f.dnssecMissing) items.push('the zone is unsigned');
+    if (f.axfrOpen) items.push('zone transfer is open to unauthenticated callers');
+    if (f.caaMissing) items.push('no CAA records constrain certificate issuance');
+    if (f.dmarcWeak) items.push('DMARC takes no action on failures');
+    exposures.push({
+      ref: 'C4', class: 'C',
+      title: 'DNS and email authentication incomplete',
+      hosts_affected: 1,
+      score_contribution: scored.components[4].points,
+      observation: `On the authoritative zone: ${items.join('; ')}.`,
+      why_it_matters: 'DNS is the layer that decides where traffic goes before any cryptography applies. An '
+        + 'unsigned zone means those answers are unauthenticated; absent CAA means any public authority may '
+        + 'issue for the domain. Neither is a quantum problem, and both undermine the transport work that is.',
+      action: 'Sign the zone and publish a DS record. Restrict AXFR to authorised secondaries. Publish CAA. Progress DMARC beyond p=none.',
+      evidence: [
+        { label: 'DNSSEC', value: f.dnssecMissing ? 'Not deployed' : 'Deployed' },
+        { label: 'Zone transfer', value: f.axfrOpen ? 'Open' : 'Restricted' },
+        { label: 'CAA records', value: f.caaMissing ? 'None' : 'Present' },
+      ],
+    });
+  }
+  if (f.sshNoPq > 0) {
+    exposures.push({
+      ref: 'A2', class: 'A',
+      title: `SSH offers no post-quantum key exchange on ${f.sshNoPq} host${f.sshNoPq === 1 ? '' : 's'}`,
+      hosts_affected: f.sshNoPq,
+      score_contribution: 0,
+      observation: `${f.sshNoPq} SSH endpoint(s) negotiate only classical key exchange.`,
+      why_it_matters: 'Retrospective, and arguably worse than the web traffic it sits behind: SSH sessions carry '
+        + 'administrative credentials and configuration. Recorded now, decrypted later, they yield lateral movement '
+        + 'into everything.',
+      action: 'Enable sntrup761x25519-sha512 or mlkem768x25519-sha256 in sshd KexAlgorithms, placed first.',
+      evidence: [{ label: 'SSH endpoints without PQ KEX', value: String(f.sshNoPq) }],
+    });
+  }
   if (f.devHosts > 0) {
     exposures.push({
       ref: 'C2', class: 'C',
       title: 'Development or staging infrastructure externally reachable',
       hosts_affected: f.devHosts,
-      score_contribution: ptsOf(scored, 'Surface discipline'),
+      score_contribution: scored.components[5].points,
       observation: `Discovery surfaced ${f.summary.hostsProbed || 0} host names, of which ${f.reachable} are reachable. `
         + `${f.devHosts} match development or staging naming conventions. A further ${f.dormant} resolve in DNS but complete no handshake.`,
       why_it_matters: 'Non-production infrastructure is routinely configured to weaker standards than production and '
@@ -254,63 +291,6 @@ function buildInput(scan, httpData, profile = {}, networkData = null, opts = {})
         { label: 'Reachable', value: String(f.reachable) },
         { label: 'Non-production reachable', value: String(f.devHosts) },
         { label: 'Dormant DNS records', value: String(f.dormant) },
-      ],
-    });
-  }
-
-  /* ── Class D — operational ────────────────────────────────────────────
-     Deploy Now, Exploit Later. Distinct from Class A and Class B in what the
-     adversary does, not merely in what it costs: they neither decrypt nor
-     forge. They present authentication material that is genuinely valid
-     because the client issued it, and log on. Only raised where the network
-     scan actually ran — the surfaces are discovered from open ports, and an
-     unrun scan is not a clean estate. */
-  const D = f.dnel;
-  if (D.assessed && D.facts.operatorSurfaceClasses > 0) {
-    /* Labels as written — lower-casing turned 'OT / ICS control' into
-       'ot / ics control' in the report body. */
-    const classList = D.surfaces.map(x => x.label).join(', ');
-    exposures.push({
-      ref: 'D1', class: 'D',
-      title: 'Operator authentication reachable under recoverable cryptography',
-      hosts_affected: D.applicableHosts,
-      score_contribution: ptsOf(scored, 'Operational access'),
-      observation: `${D.applicableHosts} of ${D.totalHosts} hosts expose an operator-authentication `
-        + `surface (${classList}). `
-        + (D.ssh.scanned
-            ? `${D.ssh.classical} of ${D.ssh.scanned} SSH hosts negotiate classical key exchange only. `
-            : '')
-        + (D.facts.cleartextAdmin
-            ? 'A cleartext administration protocol is reachable, so the credential is recoverable '
-              + 'today with no quantum step required. '
-            : '')
-        + (D.facts.credentialsOutlivingHorizon
-            ? `${D.facts.credentialsOutlivingHorizon} operator-facing credential(s) remain valid `
-              + `beyond the ${CRQC_YEAR} estimate.`
-            : ''),
-      why_it_matters: 'At Q-Day an adversary holding recovered authentication material does not need '
-        + 'to decrypt anything or forge anything. They authenticate. The session is well-formed, the '
-        + 'credential is one you issued and still trust, and there is no anomaly for a monitoring '
-        + 'control to catch — which is the practical difference from Class B, where a forged artifact '
-        + 'at least exists to be examined. Non-repudiation fails in the same moment: the audit trail '
-        + 'faithfully records an authorised operator performing authorised actions.'
-        + (D.surfaces.some(x => x.key === 'ot-ics')
-            ? ' Process-control equipment carries this furthest. A 10–30 year replacement cycle means '
-              + 'what is deployed now is what is still running at Q-Day, and equipment that is '
-              + 'certification- or hardware-locked cannot be re-keyed at any price.'
-            : ''),
-      action: 'Place operator surfaces behind an authenticated, PQ-capable gateway; enable hybrid key '
-        + 'establishment on the management plane as well as on TLS; cap operator credential lifetimes '
-        + 'so harvested material expires inside the migration window; and record the crypto-agility '
-        + 'constraint for equipment that cannot be re-keyed.',
-      evidence: [
-        { label: 'Hosts exposing an operator surface', value: `${D.applicableHosts} of ${D.totalHosts}` },
-        { label: 'Surface classes reachable', value: classList },
-        { label: 'SSH hosts without hybrid key exchange',
-          value: D.ssh.scanned ? `${D.ssh.classical} of ${D.ssh.scanned}` : 'not probed' },
-        { label: 'Cleartext administration reachable', value: D.facts.cleartextAdmin ? 'Yes' : 'No' },
-        { label: 'Credentials valid beyond the CRQC estimate',
-          value: String(D.facts.credentialsOutlivingHorizon) },
       ],
     });
   }
@@ -342,12 +322,6 @@ function buildInput(scan, httpData, profile = {}, networkData = null, opts = {})
     },
     assessment: {
       qei: scored.qei,
-      /* The denominator is not always 100: qei.js drops unassessed dimensions
-         from it rather than scoring them zero, so an estate with no network
-         scan is scored out of 85. Carrying it through is what stops the report
-         understating an estate it only partly measured. */
-      qei_max: scored.qeiMax,
-      complete: scored.complete,
       band: scored.band,
       crqc_estimate: CRQC_YEAR,
       assessment_year: assessmentYear,
@@ -375,12 +349,14 @@ function buildInput(scan, httpData, profile = {}, networkData = null, opts = {})
         status: f.hs ? 'Verified' : 'Out of scope',
         confidence: f.hs ? 'High' : '—' },
       { area: 'Host surface', method: 'Passive — Certificate Transparency, DNS', status: 'Verified', confidence: 'High' },
-      { area: 'Operator access surface',
-        method: f.dnel.assessed ? 'Active — port and service probing' : 'Not assessed',
-        status: f.dnel.assessed ? 'Verified' : 'Out of scope',
-        confidence: f.dnel.assessed ? 'High' : '—' },
-      { area: 'Crypto-agility constraint per asset', method: 'Not assessed — requires attested import',
-        status: 'Out of scope', confidence: '—' },
+      { area: 'DNS and email authentication',
+        method: dnsData ? 'Active — DNSSEC, CAA, AXFR, SPF/DKIM/DMARC' : 'Not assessed',
+        status: dnsData ? 'Verified' : 'Out of scope',
+        confidence: dnsData ? 'High' : '—' },
+      { area: 'Network and SSH',
+        method: netData ? 'Active — port and SSH inspection' : 'Not assessed',
+        status: netData ? 'Verified' : 'Out of scope',
+        confidence: netData ? 'High' : '—' },
       { area: 'Data retention period', method: 'Client-declared', status: 'Inferred', confidence: 'Client attestation' },
       { area: 'Internal cryptography', method: 'Not assessed', status: 'Out of scope', confidence: '—' },
       { area: 'Supplier posture', method: 'Not assessed', status: 'Out of scope', confidence: '—' },
@@ -425,36 +401,18 @@ function buildInput(scan, httpData, profile = {}, networkData = null, opts = {})
       dormant_dns_records: f.dormant,
       dev_or_staging_reachable: f.devHosts,
     },
-    dnel: f.dnel.assessed ? {
-      index: f.dnel.index,
-      band: f.dnel.band.label,
-      operator_surface_hosts: f.dnel.applicableHosts,
-      hosts_considered: f.dnel.totalHosts,
-      classes: f.dnel.surfaces.map(x => ({ label: x.label, hosts: x.hosts })),
-      ssh_scanned: f.dnel.ssh.scanned,
-      ssh_classical_kex: f.dnel.ssh.classical,
-      cleartext_admin: f.dnel.facts.cleartextAdmin,
-      credentials_outliving_horizon: f.dnel.facts.credentialsOutlivingHorizon,
-      not_yet_observable: f.dnel.gaps.map(g => g.label),
-    } : null,
     exposures,
     sequence: [
       { step: 1, track: 'Class A — key establishment', action: 'Confirm CDN or load balancer supports hybrid key exchange', depends_on: '—', effort: 'Days', owner: or(owners.security, 'owning team for key establishment') },
       { step: 2, track: 'Class A — key establishment', action: 'Enable X25519MLKEM768 on the highest-value host, canary first', depends_on: 'Step 1', effort: 'Weeks', owner: or(owners.security, 'owning team for key establishment') },
       { step: 3, track: 'Class A — key establishment', action: 'Extend hybrid key exchange to mail and remaining hosts', depends_on: 'Step 2', effort: 'Weeks', owner: or(owners.security, 'owning team for key establishment') },
-      ...(f.dnel.assessed && f.dnel.facts.operatorSurfaceClasses > 0 ? [
-        { step: 4, track: 'Class D — operator access', action: 'Enable hybrid key exchange on the SSH management plane (OpenSSH 9.0+) and rotate host keys', depends_on: '—', effort: 'Weeks', owner: or(owners.security, 'owning team for key establishment') },
-        { step: 5, track: 'Class D — operator access', action: 'Place reachable operator surfaces behind an authenticated gateway; retire any cleartext administration protocol', depends_on: '—', effort: 'Weeks', owner: or(owners.operations, 'owning team for hygiene') },
-        { step: 6, track: 'Class D — operator access', action: 'Cap operator credential lifetimes so no classically-signed credential outlives the migration window', depends_on: 'Step 5', effort: 'Days', owner: or(owners.security, 'owning team for key establishment') },
-      ] : []),
-      { step: 7, track: 'Class C — present-day hygiene', action: 'Set HSTS across all public hosts', depends_on: '—', effort: 'Days', owner: or(owners.operations, 'owning team for hygiene') },
-      { step: 8, track: 'Class C — present-day hygiene', action: 'Restrict non-production hosts to known sources', depends_on: '—', effort: 'Days', owner: or(owners.operations, 'owning team for hygiene') },
-      { step: 9, track: 'Class C — present-day hygiene', action: 'Audit and remove dormant DNS records', depends_on: '—', effort: 'Weeks', owner: or(owners.operations, 'owning team for hygiene') },
+      { step: 4, track: 'Class C — present-day hygiene', action: 'Set HSTS across all public hosts', depends_on: '—', effort: 'Days', owner: or(owners.operations, 'owning team for hygiene') },
+      { step: 5, track: 'Class C — present-day hygiene', action: 'Restrict non-production hosts to known sources', depends_on: '—', effort: 'Days', owner: or(owners.operations, 'owning team for hygiene') },
+      { step: 6, track: 'Class C — present-day hygiene', action: 'Audit and remove dormant DNS records', depends_on: '—', effort: 'Weeks', owner: or(owners.operations, 'owning team for hygiene') },
     ],
     projection: {
       qei_now: p.now.qei,
       qei_after_kex: p.afterKex.qei,
-      qei_after_access: p.afterAccess.qei,
       qei_after_all: p.afterAll.qei,
       residual_explanation: or(profile.residual_explanation,
         'why the index does not reach zero for this client'),
@@ -462,14 +420,9 @@ function buildInput(scan, httpData, profile = {}, networkData = null, opts = {})
         { band: 'Enable hybrid key establishment', window: '0–6 months',
           low: or(rate.kex_low, 'your rate card'), high: or(rate.kex_high, 'your rate card'),
           qei_delta: p.now.qei - p.afterKex.qei },
-        ...(f.dnel.assessed && f.dnel.facts.operatorSurfaceClasses > 0 ? [
-          { band: 'Close operator-access exposures', window: '0–3 months',
-            low: or(rate.access_low, 'your rate card'), high: or(rate.access_high, 'your rate card'),
-            qei_delta: p.afterKex.qei - p.afterAccess.qei },
-        ] : []),
         { band: 'Close Class C exposures', window: '0–2 months',
           low: or(rate.hygiene_low, 'your rate card'), high: or(rate.hygiene_high, 'your rate card'),
-          qei_delta: p.afterAccess.qei - p.afterAll.qei },
+          qei_delta: p.afterKex.qei - p.afterAll.qei },
       ],
     },
     verification: [
@@ -477,15 +430,6 @@ function buildInput(scan, httpData, profile = {}, networkData = null, opts = {})
         target: `${f.reachable} of ${f.reachable}`, verified_by: 'Re-scan, differential probe' },
       { measure: 'Externally reachable non-production hosts', today: String(f.devHosts),
         target: '0', verified_by: 'Re-scan, CT discovery' },
-      ...(f.dnel.assessed ? [
-        { measure: 'SSH hosts negotiating hybrid key exchange',
-          today: f.dnel.ssh.scanned ? `${f.dnel.ssh.pqReady} of ${f.dnel.ssh.scanned}` : 'not probed',
-          target: f.dnel.ssh.scanned ? `${f.dnel.ssh.scanned} of ${f.dnel.ssh.scanned}` : '—',
-          verified_by: 'Re-scan, SSH KEXINIT probe' },
-        { measure: 'Hosts exposing an operator-authentication surface',
-          today: String(f.dnel.applicableHosts), target: '0',
-          verified_by: 'Re-scan, port and service probe' },
-      ] : []),
       { measure: 'Quantum Exposure Index', today: String(p.now.qei),
         target: `Under ${p.afterAll.qei + 4}`, verified_by: 'Full re-assessment' },
     ],

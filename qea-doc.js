@@ -26,7 +26,6 @@ const RULE  = 'DCD8D0';
 const WASH  = 'F7F4EF';
 const RED   = 'A82C2C';
 const GREEN = '0A6B42';
-const BRONZE= '7A4A08';   /* Class D — in the amber family, distinct from AMBER */
 const W     = 9360;
 
 const money = n => '£' + n.toLocaleString('en-GB');
@@ -34,18 +33,9 @@ const CLASS_NAME = {
   A: 'Class A — Retrospective',
   B: 'Class B — Forward',
   C: 'Class C — Present-day',
-  D: 'Class D — Operational',
 };
-const CLASS_TONE = { A: RED, B: AMBER, C: MUTED, D: BRONZE };
-const CLASS_LABEL = {
-  A: 'Retrospective exposures',
-  B: 'Forward exposures',
-  C: 'Present-day exposures',
-  D: 'Operational exposures',
-};
-/* Order matters: the classes are emitted, tabulated and sequenced in this
-   order everywhere, so it is stated once. */
-const CLASSES = ['A', 'B', 'C', 'D'];
+const CLASS_TONE = { A: RED, B: AMBER, C: MUTED };
+const CLASS_LABEL = { A: 'Retrospective exposures', B: 'Forward exposures', C: 'Present-day exposures' };
 
 /* ── Primitives ────────────────────────────────────────────────────── */
 const t = (text, o = {}) => new TextRun({
@@ -169,43 +159,8 @@ function validate(scan) {
 /* Returns { buffer, sections }. `opts.tocPages` maps a section title to the
    page it landed on; without it the contents page renders unnumbered, which
    is deliberate — a stale page number is worse than no page number. */
-const DRAFT_MARK = '[TO BE COMPLETED]';
-
-/* Collect every TODO and swap it for the marker, leaving the rest untouched.
-   Done on a copy of the input rather than at each of the renderer's many call
-   sites, so a field added later cannot slip through unmarked. */
-function draftify(node, outstanding, path = '') {
-  if (typeof node === 'string') {
-    if (node.startsWith('TODO')) {
-      outstanding.push({ path, why: node.replace(/^TODO — /, '') });
-      return DRAFT_MARK;
-    }
-    return node;
-  }
-  if (Array.isArray(node)) return node.map((v, i) => draftify(v, outstanding, `${path}[${i}]`));
-  if (node && typeof node === 'object') {
-    const o = {};
-    for (const [k, v] of Object.entries(node)) o[k] = draftify(v, outstanding, path ? `${path}.${k}` : k);
-    return o;
-  }
-  return node;
-}
-
 async function build(scan, opts = {}) {
   const TOC_PAGES = opts.tocPages || null;
-
-  /* Draft: build before the profile is complete, with every unanswered field
-     marked. The document says so in the header, the classification, a banner
-     on page one and a closing section — a draft that can be mistaken for a
-     deliverable is worse than no draft at all. */
-  const DRAFT = !!opts.draft;
-  const OUTSTANDING = [];
-  if (DRAFT) {
-    scan = draftify(scan, OUTSTANDING);
-    scan.client = Object.assign({}, scan.client, {
-      classification: 'DRAFT — NOT FOR ISSUE',
-    });
-  }
   const c = scan.client;
   const a = scan.assessment;
   const s = scan.scope;
@@ -213,13 +168,8 @@ async function build(scan, opts = {}) {
      The band decides the colour everywhere the index is shown. */
   const BAND_TONE = { HIGH: RED, MEDIUM: AMBER, LOW: GREEN };
   const bandTone = BAND_TONE[a.band] || RED;
-  /* In a draft the retention period may not have been stated yet, in which
-     case the horizon and the overrun are not computable. Printing NaN into a
-     board document is not an option, and neither is picking a number. */
-  const retentionKnown = typeof c.data_retention_years === 'number' &&
-                         isFinite(c.data_retention_years);
-  const horizon = retentionKnown ? a.assessment_year + c.data_retention_years : null;
-  const overrun = retentionKnown ? horizon - a.crqc_estimate : null;
+  const horizon = a.assessment_year + c.data_retention_years;
+  const overrun = horizon - a.crqc_estimate;
   const K = [];
 
   /* Sections register themselves as they are emitted, so the contents page and the
@@ -253,7 +203,7 @@ async function build(scan, opts = {}) {
       cell(c.date_issued,      { width: 2340, size: 18 }),
       cell(c.classification,   { width: 2340, size: 18 }),
       cell(a.authorisation,    { width: 2340, size: 16, mono: true }),
-      cell(`${a.qei} / ${a.qei_max || 100}`,   { width: 2340, size: 22, bold: true, color: bandTone }),
+      cell(`${a.qei} / 100`,   { width: 2340, size: 22, bold: true, color: bandTone }),
     ]}),
   ]));
 
@@ -277,8 +227,8 @@ async function build(scan, opts = {}) {
         p([t('exposure index', { size: 13, color: MUTED, caps: true, spacing: 40 })], { after: 0, align: AlignmentType.CENTER }),
       ], { width: 2340 }),
       cell([
-        p([t(retentionKnown ? `${overrun}` : '—', { size: 36, bold: true, color: retentionKnown ? RED : MUTED })], { after: 15, align: AlignmentType.CENTER }),
-        p([t(retentionKnown ? 'years unprotected' : 'retention not stated', { size: 13, color: MUTED, caps: true, spacing: 40 })], { after: 0, align: AlignmentType.CENTER }),
+        p([t(`${overrun}`, { size: 36, bold: true, color: RED })], { after: 15, align: AlignmentType.CENTER }),
+        p([t('years unprotected', { size: 13, color: MUTED, caps: true, spacing: 40 })], { after: 0, align: AlignmentType.CENTER }),
       ], { width: 2340 }),
       cell([
         p([t(`${scan.kex.hosts_with_pq_kex} / ${s.hosts_reachable}`, { size: 36, bold: true, color: RED })], { after: 15, align: AlignmentType.CENTER }),
@@ -378,12 +328,8 @@ async function build(scan, opts = {}) {
 
   K.push(gap(260));
   K.push(tbl([W], [new TableRow({ children: [cell([
-    p([t(retentionKnown
-      ? `${overrun} years of unprotected confidentiality`
-      : 'Exposure window not yet quantifiable', { size: 21, bold: true, color: retentionKnown ? RED : MUTED })], { after: 110 }),
-    p(retentionKnown
-      ? `${c.retention_basis}. Material intercepted today therefore remains confidential until ${horizon} — ${overrun} years beyond the point at which the cryptography protecting it in transit is expected to be broken.`
-      : `The retention period has not been stated, so the exposure window cannot be computed. It is the single largest determinant of this assessment — worth 20 index points — and until it is attested the index is scored out of ${a.qei_max} rather than 100.`, { after: 110 }),
+    p([t(`${overrun} years of unprotected confidentiality`, { size: 21, bold: true, color: RED })], { after: 110 }),
+    p(`${c.retention_basis}. Material intercepted today therefore remains confidential until ${horizon} — ${overrun} years beyond the point at which the cryptography protecting it in transit is expected to be broken.`, { after: 110 }),
     p('The consequence is that the exposure is not in the future. Traffic captured now, stored, and decrypted later is compromised from the moment it is recorded. Enabling post-quantum key establishment does not repair material already intercepted; it stops the window widening.', { after: 0 }),
   ], { width: W, fill: WASH })]})]));
 
@@ -402,7 +348,7 @@ async function build(scan, opts = {}) {
     ]})),
     new TableRow({ children: [
       cell('Quantum Exposure Index', { width: cw[0], bold: true, caps: true, size: 15 }),
-      cell(`${a.qei} / ${a.qei_max || 100}`, { width: cw[1], bold: true, size: 20, color: bandTone, mono: true }),
+      cell(`${a.qei} / 100`, { width: cw[1], bold: true, size: 20, color: bandTone, mono: true }),
       cell(`Band: ${a.band}`, { width: cw[2], bold: true }),
     ]}),
   ]));
@@ -438,20 +384,19 @@ async function build(scan, opts = {}) {
   /* ── 4. Exposure classes ───────────────────────────────────────────── */
   open_('Section 04', 'Exposures by threat model');
 
-  K.push(p('Post-quantum exposures are not interchangeable. Grouping them by threat model rather than severity keeps the distinction that matters: what the adversary actually does. Two of these classes turn on cryptography being broken; one turns on credentials that were never broken at all, only recovered.'));
+  K.push(p('Post-quantum exposures are not interchangeable. Grouping them by threat model rather than severity keeps the distinction that matters: which exposures compromise material already transmitted, and which do not.'));
   K.push(gap(180));
 
   const clw = [1980, 4200, 1590, 1590];
   K.push(tbl(clw, [
     head(clw, ['Class', 'Threat model', 'Exposures', 'Index points']),
-    ...CLASSES.map(cl => {
+    ...['A', 'B', 'C'].map(cl => {
       const set = scan.exposures.filter(e => e.class === cl);
       const pts = set.reduce((n, e) => n + e.score_contribution, 0);
       const desc = {
         A: 'Retrospective. Material transmitted today is compromised when quantum capability arrives. Confidentiality.',
         B: 'Forward. Risk begins when quantum capability arrives; historic material is unaffected. Integrity and authenticity.',
         C: 'Present-day. Unrelated to quantum computing, but bears on the same programme and the same estate.',
-        D: 'Operational. The adversary neither decrypts nor forges — they present genuine credentials and authenticate. Access and non-repudiation.',
       }[cl];
       return new TableRow({ children: [
         cell(CLASS_NAME[cl], { width: clw[0], bold: true, color: CLASS_TONE[cl], size: 17 }),
@@ -464,12 +409,11 @@ async function build(scan, opts = {}) {
   ]));
 
   K.push(gap(240));
-  K.push(p([t('Class A carries the priority. Delay there increases the volume of compromised material, and nothing retires it: traffic already captured cannot be un-captured.', { bold: true })], { after: 130 }));
-  K.push(p([t('Class D is the closest to it and the distinction is worth stating precisely. Delay increases the volume of harvested authentication material in the same way — but unlike Class A, rotation retires it. A credential recovered from a handshake captured five years ago is worthless if the key it authenticates has since been re-issued. That makes credential lifetime a control in Class D where it is no control at all in Class A, and it is why the operator-access track is scoped around rotation and gateway placement rather than around cryptography alone.', { color: MUTED })], { after: 130 }));
-  K.push(p([t('Class C items appear early in the sequence and cost tables because they take days rather than weeks and are carried by a different team. Speed of closure is not precedence: nothing in Class C reduces retrospective exposure, and neither the Class A nor the Class D track should wait on it.', { color: MUTED })], { after: 0 }));
+  K.push(p([t('Class A carries the priority. It is the only class in which delay increases the volume of compromised material.', { bold: true })], { after: 130 }));
+  K.push(p([t('Class C items appear early in the sequence and cost tables because they take days rather than weeks and are carried by a different team. Speed of closure is not precedence: nothing in Class C reduces retrospective exposure, and the Class A track should not wait on it.', { color: MUTED })], { after: 0 }));
 
   /* ── 5. Each exposure ──────────────────────────────────────────────── */
-  CLASSES.forEach(cl => {
+  ['A', 'B', 'C'].forEach(cl => {
     const set = scan.exposures.filter(e => e.class === cl);
     if (!set.length) return;
 
@@ -503,11 +447,8 @@ async function build(scan, opts = {}) {
       const ew = [4680, 4680];
       K.push(tbl(ew, [
         head(ew, ['Evidence', 'Value']),
-        /* qea-input emits `label`; hand-edited scan files and adapt-scan.js
-           have used `item`. Reading only one printed the string "undefined"
-           in the left column of every evidence table in the report. */
         ...e.evidence.map(v => new TableRow({ children: [
-          cell(v.item || v.label || '', { width: ew[0], size: 17, color: MUTED }),
+          cell(v.item, { width: ew[0], size: 17, color: MUTED }),
           cell(v.value, { width: ew[1], size: 17, bold: true, mono: true }),
         ]})),
       ], { boxed: false }));
@@ -518,21 +459,11 @@ async function build(scan, opts = {}) {
 
   /* ── 6. Sequence ───────────────────────────────────────────────────── */
   open_('Section 05', 'Sequence of work');
-  /* The track count is not fixed: an estate with no reachable operator
-     surface has no Class D track, and saying "two tracks" over three rows
-     is the kind of small wrongness a reader notices. */
-  const trackCount = new Set(scan.sequence.map(x => x.track || '—')).size;
-  const trackWord = ['no', 'One track', 'Two tracks', 'Three tracks', 'Four tracks'][trackCount] || `${trackCount} tracks`;
-  K.push(p(`${trackWord}, owned by different teams and run concurrently. None waits on another. Within a track, steps are ordered by dependency rather than by effort; steps showing no dependency can begin immediately.`));
+  K.push(p('Two tracks, owned by different teams and run concurrently. Neither waits on the other. Within a track, steps are ordered by dependency rather than by effort; steps showing no dependency can begin immediately.'));
   K.push(gap(160));
 
   const sw = [700, 4700, 1560, 1200, 1200];
-  const TRACK_TONE = {
-    'Class A — key establishment': RED,
-    'Class D — operator access': BRONZE,
-    'Class C — present-day hygiene': MUTED,
-    'Inventory': MUTED,
-  };
+  const TRACK_TONE = { 'Class A — key establishment': RED, 'Class C — present-day hygiene': MUTED, 'Inventory': MUTED };
   const trackRow = name => new TableRow({ children: [cell([
     p([t(name, { size: 15, bold: true, color: TRACK_TONE[name] || MUTED, caps: true, spacing: 60 })], { after: 0 }),
   ], { width: sw.reduce((a, b) => a + b, 0), span: 5, fill: WASH })]});
@@ -553,33 +484,31 @@ async function build(scan, opts = {}) {
 
   K.push(tbl(sw, [head(sw, ['', 'Action', 'Depends on', 'Effort', 'Owner']), ...seqRows]));
   K.push(gap(240));
-  K.push(p([t('The critical path is the Class A track. It is longer, it is owned by Security Engineering, and it is the only track that changes the confidentiality of material already in transit. Where an operator-access track is present it runs alongside rather than behind: its first step is the same hybrid key establishment work applied to the management plane, and its remaining steps are firewall and lifecycle changes that need no cryptographic decision at all. The hygiene track is quick and cheap, and is listed last for that reason — not because it matters less to a browser, but because it bears on neither.', { color: MUTED })], { after: 0 }));
+  K.push(p([t('The critical path is the Class A track. It is longer, it is owned by Security Engineering, and it is the only track that changes retrospective exposure. The hygiene track is quick and cheap, and is listed second for that reason — not because it matters less to a browser, but because it does not bear on the confidentiality of material already in transit.', { color: MUTED })], { after: 0 }));
 
   K.push(new Paragraph({ children: [new PageBreak()] }));
 
   /* ── 7. Projection ─────────────────────────────────────────────────── */
   open_('Section 06', 'What changes if you act');
-  const pr = scan.projection;
-  const hasAccess = typeof pr.qei_after_access === 'number'
-    && pr.qei_after_access !== pr.qei_after_kex;
-
-  K.push(p(`Modelled by re-running the scoring engine against the target configuration. The same rules, applied to the estate as it would stand after each band of work. The bands run concurrently; the windows overlap rather than follow one another${hasAccess ? ', and the operator-access track shares its first step with key establishment' : ''}.`));
+  K.push(p('Modelled by re-running the scoring engine against the target configuration. The same rules, applied to the estate as it would stand after each band of work. The first two bands run concurrently; the windows overlap rather than follow one another.'));
   K.push(gap(200));
 
-  /* Stages are built rather than fixed, so an estate with no reachable
-     operator surface does not get a column that says nothing. */
-  const stages = [
-    { v: pr.qei_now, label: 'today', tone: bandTone },
-    { v: pr.qei_after_kex, label: 'after key establishment', tone: AMBER },
-    ...(hasAccess ? [{ v: pr.qei_after_access, label: 'after operator access', tone: BRONZE }] : []),
-    { v: pr.qei_after_all, label: 'after all tracks', tone: GREEN },
-  ];
-  const stw = Math.floor(W / stages.length);
-  K.push(tbl(stages.map(() => stw), [
-    new TableRow({ children: stages.map(x => cell([
-      p([t(String(x.v), { size: 40, bold: true, color: x.tone })], { after: 15, align: AlignmentType.CENTER }),
-      p([t(x.label, { size: 14, color: MUTED, caps: true, spacing: 40 })], { after: 0, align: AlignmentType.CENTER }),
-    ], { width: stw })) }),
+  const pr = scan.projection;
+  K.push(tbl([3120, 3120, 3120], [
+    new TableRow({ children: [
+      cell([
+        p([t(String(pr.qei_now), { size: 40, bold: true, color: bandTone })], { after: 15, align: AlignmentType.CENTER }),
+        p([t('today', { size: 14, color: MUTED, caps: true, spacing: 40 })], { after: 0, align: AlignmentType.CENTER }),
+      ], { width: 3120 }),
+      cell([
+        p([t(String(pr.qei_after_kex), { size: 40, bold: true, color: AMBER })], { after: 15, align: AlignmentType.CENTER }),
+        p([t('after key establishment', { size: 14, color: MUTED, caps: true, spacing: 40 })], { after: 0, align: AlignmentType.CENTER }),
+      ], { width: 3120 }),
+      cell([
+        p([t(String(pr.qei_after_all), { size: 40, bold: true, color: GREEN })], { after: 15, align: AlignmentType.CENTER }),
+        p([t('after both tracks', { size: 14, color: MUTED, caps: true, spacing: 40 })], { after: 0, align: AlignmentType.CENTER }),
+      ], { width: 3120 }),
+    ]}),
   ]));
 
   K.push(gap(280));
@@ -608,13 +537,9 @@ async function build(scan, opts = {}) {
   const vw = [3600, 1800, 1800, 2160];
   K.push(tbl(vw, [
     head(vw, ['Measure', 'Today', 'Target', 'Verified by']),
-    /* Same key mismatch as the evidence tables: qea-input emits `today`,
-       this read `now`, and the Today column printed "undefined" on every
-       row of every report. Accept both. */
     ...scan.verification.map(x => new TableRow({ children: [
       cell(x.measure, { width: vw[0], size: 17 }),
-      cell(x.now !== undefined ? x.now : (x.today !== undefined ? x.today : ''),
-           { width: vw[1], size: 17, color: MUTED, mono: true }),
+      cell(x.now, { width: vw[1], size: 17, color: MUTED, mono: true }),
       cell(x.target, { width: vw[2], size: 17, bold: true, color: GREEN, mono: true }),
       cell(x.verified_by, { width: vw[3], size: 16, color: MUTED }),
     ]})),
@@ -677,12 +602,10 @@ async function build(scan, opts = {}) {
     ...[
       ['Retrospective exposure', 'Material transmitted today is compromised once quantum capability arrives. Applies to key establishment. Delay increases the volume of compromised material.'],
       ['Forward exposure', 'Risk begins when quantum capability arrives; material already transmitted is unaffected. Applies to signatures.'],
-      ['Operational exposure', 'An adversary authenticates using genuine credential material recovered from recorded key establishment, rather than decrypting traffic or forging an artifact. Nothing is anomalous: the credential was issued by the organisation and is still trusted, and the audit trail records an authorised operator. Rotation retires it, which is the practical difference from retrospective exposure. Also referred to as Deploy Now, Exploit Later.'],
-      ['Crypto-agility constraint', 'Whether an asset can accept new cryptography at all — field-upgradable, firmware-locked, certification-locked or hardware-locked. Not observable over the wire and not assessed here. It is the principal determinant of operational exposure in estates with long equipment lifecycles.'],
       ['CRQC', 'Cryptographically relevant quantum computer. Sufficient stable logical qubits to run Shor\'s algorithm against production key sizes. The 2033 figure is an estimate and is configurable.'],
       ['Hybrid key establishment', 'A construction combining classical and post-quantum mechanisms, such as X25519MLKEM768. Security holds if either component holds, so deployment carries no reduction in classical security.'],
       ['ML-KEM', 'Module-Lattice Key Encapsulation Mechanism, NIST FIPS 203.'],
-      ['Quantum Exposure Index', 'CipherQ\'s composite score across seven weighted dimensions. Dimensions that could not be assessed are removed from the denominator rather than scored zero, so the maximum shown is not always 100. Every point is attributable to an observation or a rule.'],
+      ['Quantum Exposure Index', 'CipherQ\'s composite score, 0–100, across six weighted dimensions. Every point is attributable to an observation or a rule.'],
     ].map(([k, v]) => new TableRow({ children: [
       cell(k, { width: dw[0], bold: true, size: 17 }),
       cell(v, { width: dw[1], size: 17 }),
@@ -719,14 +642,6 @@ async function build(scan, opts = {}) {
     ['Hosts serving mixed content', H.mixed_content_hosts],
     ['Externally reachable non-production hosts', scan.surface.dev_or_staging_reachable],
     ['Dormant DNS records', scan.surface.dormant_dns_records],
-    ...(scan.dnel ? [
-      ['Hosts exposing an operator-authentication surface', scan.dnel.operator_surface_hosts],
-      ['Operator surface classes reachable', scan.dnel.classes.map(x => `${x.label} (${x.hosts})`).join(', ')],
-      ['SSH hosts probed', scan.dnel.ssh_scanned],
-      ['SSH hosts without hybrid key exchange', scan.dnel.ssh_classical_kex],
-      ['Cleartext administration protocol reachable', scan.dnel.cleartext_admin ? 'Yes' : 'No'],
-      ['Operator credentials valid beyond the CRQC estimate', scan.dnel.credentials_outliving_horizon],
-    ] : []),
   ].filter(([, v]) => v !== undefined && v !== null && v !== '')
    .map(([k, v]) => [k, String(v)]);
   K.push(tbl(ow, [
@@ -789,32 +704,6 @@ async function build(scan, opts = {}) {
      A live Word TOC field was the obvious choice and is the wrong one here: the
      deliverable is a PDF, and headless converters leave the field unpopulated —
      the client would receive a blank contents page. */
-  /* Everything still outstanding, named with the reason it matters, so the
-     draft is also the worklist for finishing it. */
-  if (DRAFT) {
-    open_('Before issue', 'Outstanding');
-    K.push(p('This document is a draft. Every field marked ' + DRAFT_MARK + ' is a judgement the scan cannot make, and each one below must be answered before the report is issued to a client.', { after: 140 }));
-    if (!OUTSTANDING.length) {
-      K.push(p('Nothing outstanding.', { after: 140 }));
-    } else {
-      K.push(tbl([2900, 6460], [
-        new TableRow({ children: [
-          cell([p([t('Field', { size: 16, bold: true, color: AMBER, caps: true, spacing: 40 })])], { width: 2900, fill: WASH }),
-          cell([p([t('What is needed', { size: 16, bold: true, color: AMBER, caps: true, spacing: 40 })])], { width: 6460, fill: WASH }),
-        ]}),
-        ...OUTSTANDING.map(o => new TableRow({ children: [
-          cell([p([t(o.path, { size: 17, bold: true })])], { width: 2900 }),
-          cell([p([t(o.why, { size: 17, color: MUTED })])], { width: 6460 }),
-        ]})),
-      ]));
-      K.push(gap(160));
-      K.push(p([t(`${OUTSTANDING.length} field${OUTSTANDING.length === 1 ? '' : 's'} outstanding.`, { bold: true, color: RED })], { after: 140 }));
-    }
-    if (!scan.assessment || scan.assessment.complete === false) {
-      K.push(p([t('The index is scored out of ' + ((scan.assessment && scan.assessment.qei_max) || 100) + ', not 100: dimensions that could not be assessed are removed from the denominator rather than scored zero. Answering the outstanding fields — the retention period above all — will change both the figure and its maximum.', { color: MUTED })], { after: 140 }));
-    }
-  }
-
   const numbered = TOC_PAGES && SECTIONS.every(x => TOC_PAGES[x.title]);
   const tocRows = SECTIONS.map(x => new TableRow({ children: [
     cell(x.kicker, { width: 2200, size: 14, caps: true, color: MUTED, bold: true }),
@@ -832,7 +721,7 @@ async function build(scan, opts = {}) {
     gap(300),
     tbl([W], [new TableRow({ children: [cell([
       p([t('How to read this report', { size: 16, bold: true, color: AMBER, caps: true, spacing: 40 })], { after: 90 }),
-      p('Exposures are grouped by threat model rather than by severity, because what the adversary does differs by class. Class A is retrospective: material transmitted today is compromised once quantum capability arrives, so delay increases the volume at risk and nothing retires it. Class D is operational: the adversary presents genuine credentials rather than decrypting or forging anything, so there is no anomaly to detect — but unlike Class A, rotation retires the exposure. Class B and Class C carry neither property. Where the report sequences Class C work early, it is because those items take days and a different team carries them — not because they rank above Class A.', { size: 18, after: 0 }),
+      p('Exposures are grouped by threat model rather than by severity. Class A is retrospective: material transmitted today is compromised once quantum capability arrives, so delay increases the volume at risk. Class B and Class C do not carry that property. Where the report sequences Class C work early, it is because those items take days and a different team carries them — not because they rank above Class A.', { size: 18, after: 0 }),
     ], { width: W, fill: WASH })]})]),
     new Paragraph({ children: [new PageBreak()] }),
   ];
@@ -854,9 +743,7 @@ async function build(scan, opts = {}) {
         children: [
           t('CipherQ', { size: 14, bold: true, color: AMBER, caps: true, spacing: 60 }),
           t('     Quantum Exposure Assessment     ', { size: 14, color: MUTED, caps: true, spacing: 60 }),
-          /* On every page, not just the first — pages get printed and
-             circulated separately from the document they came out of. */
-          t(c.classification, { size: 14, color: DRAFT ? RED : MUTED, bold: DRAFT }),
+          t(c.classification, { size: 14, color: MUTED }),
         ],
         spacing: { after: 220 },
       })]})},

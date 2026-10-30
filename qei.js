@@ -20,71 +20,21 @@
 
    Bump METHOD_VERSION whenever a weight or an input changes, so an index of
    74 computed today and one computed next year cannot be silently compared.
-
-   ── v3: operational access (DNEL) ─────────────────────────────────────
-   Version 3 adds a seventh dimension for Deploy Now, Exploit Later — the
-   exposure created when an adversary presents genuine authentication
-   material rather than decrypting traffic (HNDL) or forging an artifact
-   (TNFL). See dnel.js for the threat model and the port classification.
-
-   The 15 points it carries were taken from dimensions that either overlap
-   with it or are explicitly not quantum exposures, leaving the two that
-   carry the report's central argument untouched:
-
-     exposure surface    15 → 10   a raw reachable-host count; operational
-                                   access now measures what KIND of surface,
-                                   which is the more informative half
-     transport hygiene   15 → 11   present-day risk, scored for programme
-                                   credibility rather than quantum exposure
-     certificate posture 15 → 12   forward-only, already deliberately below
-                                   key establishment
-     surface discipline  10 →  7   overlaps directly — a reachable dev host
-                                   and a reachable operator surface are
-                                   adjacent observations
-     key establishment   25 → 25   untouched: the retrospective argument
-     data lifetime       20 → 20   untouched: the report's central argument
-
-   Every existing score moves as a result. That is the point of the version
-   stamp: getBoardMetrics suppresses the trend across the boundary rather
-   than presenting the shift as progress.
-
-   Operational access is unassessed when the network scan has not run, and
-   drops from the denominator exactly as data lifetime does. An estate that
-   was never port-scanned is not an estate with no exposed operator surface.
    ═══════════════════════════════════════════════════════════════════════ */
 
-const METHOD_VERSION = 3;   /* 1 = retired scanner scorer · 2 = pre-DNEL six-dimension */
+const METHOD_VERSION = 2;   /* 1 was the scanner's computeQEI, now retired */
 
 const MAX = {
   keyEstablishment: 25,
   dataLifetime: 20,
-  operationalAccess: 15,
-  exposureSurface: 10,
-  certificatePosture: 12,
-  transportHygiene: 11,
-  surfaceDiscipline: 7,
+  exposureSurface: 15,
+  certificatePosture: 15,
+  transportHygiene: 15,
+  surfaceDiscipline: 10,
 };
 
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 const pct = (n, d) => (d > 0 ? n / d : 0);
-
-/* Operational access, 0–15. Lives here rather than in dnel.js so the number
-   exists once: dnel.js classifies ports and raises findings, this computes
-   the index contribution, and the projection in qea-input.js can re-run it
-   against a modelled estate by mutating the same facts.
-
-   Scored as the worst operator surface class present, plus a little for
-   breadth, plus the state of the cryptography authenticating to it. A
-   surface that is PQ-ready still scores, because the surface exists; it
-   simply scores far less than one whose key exchange is recoverable. */
-function operationalAccessPoints(d) {
-  if (!d || !d.operatorSurfaceClasses) return 0;
-  const surfacePts = clamp(
-    (d.worstSurfaceWeight || 0) + Math.min(3, Math.max(0, d.operatorSurfaceClasses - 1)), 0, 10);
-  const cryptoPts = d.classicalOperatorAuth ? 3 : 0;
-  const cleartextPts = d.cleartextAdmin ? 2 : 0;
-  return clamp(surfacePts + cryptoPts + cleartextPts, 0, MAX.operationalAccess);
-}
 
 /**
  * facts — everything observable from a scan:
@@ -148,32 +98,7 @@ function computeQEI(facts, client) {
     note: 'Retention period not supplied — client-attested, cannot be observed',
   });
 
-  /* ── Operational access (15) — DNEL ───────────────────────────────────
-     Deploy Now, Exploit Later. Not what an adversary can read or forge, but
-     what they can log in to using material that is genuinely theirs to
-     present because you issued it. Unassessed without a network scan: the
-     surfaces are discovered from open ports, and an unrun scan is not a
-     clean result. */
-  const dn = f.dnel || null;
-  comp.push(dn && dn.networkScanRan ? {
-    dimension: 'Operational access',
-    points: operationalAccessPoints(dn),
-    max: MAX.operationalAccess,
-    note: dn.operatorSurfaceClasses
-      ? `${dn.operatorSurfaceHosts} host(s) expose an operator-authentication surface across `
-        + `${dn.operatorSurfaceClasses} class(es)`
-        + (dn.classicalOperatorAuth ? ', authenticated under classical key establishment' : '')
-        + (dn.cleartextAdmin ? '; cleartext administration protocol reachable' : '')
-      : 'No operator-authentication surface reachable',
-  } : {
-    dimension: 'Operational access',
-    points: 0,
-    max: MAX.operationalAccess,
-    unassessed: true,
-    note: 'Network scan not run — operator surfaces are discovered from open ports',
-  });
-
-  /* ── Exposure surface (10) ────────────────────────────────────────────
+  /* ── Exposure surface (15) ────────────────────────────────────────────
      Reachable hosts, not discovered hosts. A dormant DNS record is a
      surface-discipline problem, not an exposure. */
   comp.push({
@@ -258,4 +183,4 @@ function reconcile(assessment) {
     : { ok: false, sum, stated: assessment.qei };
 }
 
-module.exports = { computeQEI, reconcile, operationalAccessPoints, METHOD_VERSION, MAX };
+module.exports = { computeQEI, reconcile, METHOD_VERSION, MAX };
